@@ -22,7 +22,8 @@ PLISTBUDDY=/usr/libexec/PlistBuddy
 SYSEXT_REL="Contents/Library/SystemExtensions/ai.canyonroad.agentsh.SysExt.systemextension"
 # Restricted entitlements this project uses. Apple publishes no
 # machine-readable classification; extend this list when a new restricted
-# entitlement is adopted.
+# entitlement is adopted — and if it is load-bearing, also add it to the
+# per-bundle required_ents case in check 6.
 RESTRICTED_ENTITLEMENTS=(
   com.apple.developer.endpoint-security.client
   com.apple.developer.networking.networkextension

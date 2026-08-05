@@ -180,7 +180,10 @@ acceptance.
 1. **Detector validates against the real bug:** run the script against an
    installed v0.20.5 `/Applications/AgentSH.app` — must fail with the
    sysext missing-profile error (and the entitlement cross-check must flag
-   `endpoint-security.client` as claimed-but-not-granted).
+   `endpoint-security.client` as claimed-but-not-granted). *Executed as: no
+   v0.20.5 install existed on the dev machine, so this was substituted with
+   an ad-hoc-signed fixture reproducing the identical failure shape (see
+   plan Task 1 steps 4–5).*
 2. **Fixed bundle passes:** a locally assembled bundle with both profiles
    embedded (or the next release run) must pass all checks.
 3. **Negative paths:** missing argument, non-bundle path, non-macOS guard —
