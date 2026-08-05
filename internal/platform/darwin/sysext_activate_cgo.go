@@ -112,8 +112,6 @@ const (
 	ActivateFailed ActivateResult = -1
 )
 
-const sysExtBundleID = "ai.canyonroad.agentsh.SysExt"
-
 // activateExtension calls OSSystemExtensionManager to activate the system extension.
 // This blocks until the request completes or the system indicates user approval is needed.
 func activateExtension() (ActivateResult, error) {
