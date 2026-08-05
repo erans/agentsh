@@ -55,9 +55,10 @@ security find-identity -v -p codesigning
 # Build for Apple Silicon (arm64)
 make build-macos-go
 
-# This creates:
-# - build/AgentSH.app/Contents/MacOS/agentsh (arm64)
-# - build/AgentSH-amd64.app/Contents/MacOS/agentsh (amd64)
+# This creates, in build/go-local/ (arm64):
+# - agentsh             (CGO enabled, `nofuse` tag — required for system extension support)
+# - agentsh-shell-shim  (CGO disabled)
+# - agentsh-stub        (CGO disabled)
 ```
 
 #### 2. Build Swift Components
@@ -95,26 +96,32 @@ SIGNING_IDENTITY="Apple Development" make sign-bundle
 SIGNING_IDENTITY="Developer ID Application" make build-macos-enterprise
 ```
 
+The target finishes by running `scripts/verify-macos-bundle.sh build/AgentSH.app`, which fails the build if the provisioning profiles are missing from the bundle.
+
 ### Output Structure
 
 ```
 build/AgentSH.app/
 ├── Contents/
 │   ├── Info.plist
+│   ├── embedded.provisionprofile
 │   ├── MacOS/
-│   │   └── agentsh                    # Go binary
+│   │   ├── agentsh                    # Go binary (CGO, nofuse)
+│   │   ├── agentsh-shell-shim
+│   │   └── agentsh-stub
 │   ├── Library/
 │   │   └── SystemExtensions/
-│   │       └── ai.canyonroad.agentsh.sysext.systemextension/
+│   │       └── ai.canyonroad.agentsh.SysExt.systemextension/
 │   │           ├── Contents/
 │   │           │   ├── MacOS/
-│   │           │   │   └── ai.canyonroad.agentsh.sysext  # ESF + NE
+│   │           │   │   └── ai.canyonroad.agentsh.SysExt  # ESF + NE
+│   │           │   ├── embedded.provisionprofile
 │   │           │   └── Info.plist
 │   └── XPCServices/
-│       └── ai.canyonroad.agentsh.xpc.xpc/
+│       └── xpc.xpc/
 │           ├── Contents/
 │           │   ├── MacOS/
-│           │   │   └── ai.canyonroad.agentsh.xpc  # XPC bridge
+│           │   │   └── xpc  # XPC bridge
 │           │   └── Info.plist
 ```
 
