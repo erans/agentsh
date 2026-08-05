@@ -10,6 +10,8 @@
 #
 # Usage: scripts/verify-macos-bundle.sh /path/to/AgentSH.app
 #
+# Requires macOS 12+ (codesign --xml needs 11+, plutil -extract raw needs 12+).
+#
 # Exit codes: 0 all checks pass (warnings allowed), 1 check failures,
 # 2 usage/environment error.
 #
@@ -69,10 +71,30 @@ check_bundle() {
   if codesign -d --entitlements "$ents" --xml "$bundle" 2>/dev/null && [ -s "$ents" ]; then
     have_ents=1
   else
-    fail "$label: cannot read signed entitlements (unsigned bundle?)"
+    fail "$label: cannot read signed entitlements (unsigned, ad-hoc, or signed with no entitlements)"
   fi
   local sig_team
   sig_team="$(codesign -dvv "$bundle" 2>&1 | awk -F= '/^TeamIdentifier=/{print $2; exit}')"
+
+  # Check 6: each bundle must actually CLAIM its load-bearing restricted
+  # entitlements. Check 5 alone (claimed ⊆ granted) false-passes when a
+  # signing regression drops entitlements from the signature entirely —
+  # the wrong --entitlements file ships a sysext that cannot create an ES
+  # client, silently (same failure character as #436).
+  local required_ents=""
+  case "$label" in
+    app)    required_ents="com.apple.developer.system-extension.install" ;;
+    sysext) required_ents="com.apple.developer.endpoint-security.client com.apple.developer.networking.networkextension" ;;
+  esac
+  if [ "$have_ents" -eq 1 ]; then
+    for ent in $required_ents; do
+      if "$PLISTBUDDY" -c "Print :$ent" "$ents" >/dev/null 2>&1; then
+        pass "$label: signature claims required entitlement $ent"
+      else
+        fail "$label: signature does NOT claim required entitlement $ent (wrong entitlements file at signing?)"
+      fi
+    done
+  fi
 
   # Check 1: profile present and decodable.
   if [ ! -f "$profile" ]; then
