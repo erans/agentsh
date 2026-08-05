@@ -32,26 +32,31 @@ for bin in "${APP}/Contents/MacOS"/*; do
       --options runtime --timestamp \
       "$bin"
   fi
+  codesign --verify --strict "$bin"
 done
 
 # 2. System Extension
+echo "Signing System Extension"
 codesign --force --sign "$SIGNING_IDENTITY" \
   --entitlements macos/AgentSH/SysExt.entitlements \
   --options runtime --timestamp \
   "${APP}/Contents/Library/SystemExtensions/${SYSEXT}"
 
 # 3. XPC Service
+echo "Signing XPC Service"
 codesign --force --sign "$SIGNING_IDENTITY" \
   --options runtime --timestamp \
   "${APP}/Contents/XPCServices/xpc.xpc"
 
 # 4. Approval Dialog
+echo "Signing Approval Dialog"
 codesign --force --sign "$SIGNING_IDENTITY" \
   --entitlements macos/AgentSH/approval-dialog/approval-dialog.entitlements \
   --options runtime --timestamp \
   "${APP}/Contents/Resources/approval-dialog.app"
 
 # 5. Main app bundle
+echo "Signing app bundle"
 codesign --force --sign "$SIGNING_IDENTITY" \
   --entitlements macos/AgentSH/agentsh/agentsh.entitlements \
   --options runtime --timestamp \
