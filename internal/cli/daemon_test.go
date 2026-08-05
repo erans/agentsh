@@ -374,5 +374,3 @@ func TestServerCmd_AcceptsLegacyDaemonFlag(t *testing.T) {
 		t.Error("--daemon is a compatibility no-op and should not appear in --help")
 	}
 }
-
-
