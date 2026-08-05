@@ -177,10 +177,7 @@ This stops the current daemon, clears session state, and starts a new session.`,
 
 			case "darwin":
 				fmt.Fprintln(w, "Restarting agentsh daemon...")
-				// Unload and reload the service
-				plistPath := getLaunchdPlistPath()
-				_ = exec.Command("launchctl", "unload", plistPath).Run()
-				if err := exec.Command("launchctl", "load", plistPath).Run(); err != nil {
+				if err := reloadLaunchdService(getLaunchdPlistPath()); err != nil {
 					return fmt.Errorf("restart failed: %w", err)
 				}
 				fmt.Fprintln(w, "Daemon restarted successfully")
@@ -381,6 +378,14 @@ func getLaunchdPlistPath() string {
 	return filepath.Join(home, "Library", "LaunchAgents", "ai.canyonroad.agentsh.daemon.plist")
 }
 
+// reloadLaunchdService replaces whatever job definition launchd currently
+// holds with the plist on disk. The unload error is ignored: not-loaded is
+// the expected case on a fresh install.
+func reloadLaunchdService(plistPath string) error {
+	_ = exec.Command("launchctl", "unload", plistPath).Run()
+	return exec.Command("launchctl", "load", plistPath).Run()
+}
+
 func installLaunchdService(cmd *cobra.Command, force bool) error {
 	w := cmd.OutOrStdout()
 
@@ -429,12 +434,12 @@ func installLaunchdService(cmd *cobra.Command, force bool) error {
 	fmt.Fprintf(w, "Service installed: %s\n", plistPath)
 	fmt.Fprintln(w)
 
-	// Load the service
-	if err := exec.Command("launchctl", "load", plistPath).Run(); err != nil {
-		fmt.Fprintf(w, "Warning: failed to load service: %v\n", err)
-	} else {
-		fmt.Fprintln(w, "Service loaded and started")
+	// Load the service, replacing any already-loaded definition — the normal
+	// case under --force, where an installation exists by definition (#439).
+	if err := reloadLaunchdService(plistPath); err != nil {
+		return fmt.Errorf("load service: %w (plist written to %s; load manually with: launchctl load %s)", err, plistPath, plistPath)
 	}
+	fmt.Fprintln(w, "Service loaded and started")
 
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "To check status:")
