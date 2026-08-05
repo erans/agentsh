@@ -68,8 +68,8 @@ make build-macos-go
 make build-swift
 
 # This builds:
-# - ai.canyonroad.agentsh.sysext.systemextension
-# - ai.canyonroad.agentsh.xpc.xpc
+# - ai.canyonroad.agentsh.SysExt.systemextension
+# - xpc.xpc
 ```
 
 #### 3. Assemble App Bundle
