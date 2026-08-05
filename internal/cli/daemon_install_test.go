@@ -139,6 +139,21 @@ func TestInstallLaunchd_ExistingPlistWithoutForce(t *testing.T) {
 	}
 }
 
+func TestInstallLaunchd_FreshInstallToleratesUnloadFailure(t *testing.T) {
+	callsFile := setupFakeTools(t, `[ "$1" = "unload" ] && exit 1`, "")
+	cmd, _ := newTestCmd()
+
+	if err := installLaunchdService(cmd, false); err != nil {
+		t.Fatalf("install should succeed when unload fails (job not loaded): %v", err)
+	}
+
+	plistPath := getLaunchdPlistPath()
+	assertCalls(t, recordedCalls(t, callsFile), []string{
+		"launchctl unload " + plistPath,
+		"launchctl load " + plistPath,
+	})
+}
+
 func TestInstallLaunchd_LoadFailureIsError(t *testing.T) {
 	setupFakeTools(t, `[ "$1" = "load" ] && { echo "Load failed: 5: input/output error" >&2; exit 1; }`, "")
 	cmd, _ := newTestCmd()

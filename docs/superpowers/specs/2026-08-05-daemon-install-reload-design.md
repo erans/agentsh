@@ -50,7 +50,10 @@ Out of scope:
 // the expected case on a fresh install.
 func reloadLaunchdService(plistPath string) error {
     _ = exec.Command("launchctl", "unload", plistPath).Run()
-    return exec.Command("launchctl", "load", plistPath).Run()
+    out, err := exec.Command("launchctl", "load", plistPath).CombinedOutput()
+    // on failure, include launchctl's diagnostic output (it goes to stderr,
+    // so a bare exit status would be unactionable) in the returned error
+    ...
 }
 
 // restartSystemdIfActive restarts the agentsh user unit only when it is
@@ -114,10 +117,12 @@ falling back to `$HOME`.
 | `systemctl restart` fails on install with active unit (Linux) | n/a (never attempted) | Hard error, exit non-zero; message includes manual restart command |
 | `launchctl unload` fails on install/restart | n/a / ignored | Ignored (not-loaded is the expected fresh-install case) |
 | `daemon-reload` / `enable` fail (Linux) | `Warning:`, exit 0 | Unchanged (deferred) |
+| `is-active` query fails (Linux) | n/a | Treated as not-active; restart skipped (a broken systemctl already produced warnings above) |
 
 ## Testing
 
-New tests in `internal/cli/daemon_test.go`, in the existing file's style
+New tests in `internal/cli/daemon_install_test.go` (a new file, keeping the
+existing 385-line `daemon_test.go` focused), in the codebase's existing style
 (shell-script helpers, as `auto_daemon_test.go` already uses):
 
 - Fake `launchctl` and `systemctl` shell scripts in a `t.TempDir()` prepended
