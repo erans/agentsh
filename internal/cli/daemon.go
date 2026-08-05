@@ -288,10 +288,22 @@ func installSystemdService(cmd *cobra.Command, force bool) error {
 		fmt.Fprintln(w, "Service enabled for automatic start on login")
 	}
 
+	// A pre-existing daemon (notably under --force) keeps running the old
+	// ExecStart until bounced; restart so the new unit takes effect (#439).
+	restarted, err := restartSystemdIfActive()
+	if err != nil {
+		return fmt.Errorf("restart service: %w (unit written to %s; restart manually with: systemctl --user restart agentsh)", err, servicePath)
+	}
+	if restarted {
+		fmt.Fprintln(w, "Service restarted with updated configuration")
+	}
+
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "To start the daemon now:")
-	fmt.Fprintln(w, "  systemctl --user start agentsh")
-	fmt.Fprintln(w)
+	if !restarted {
+		fmt.Fprintln(w, "To start the daemon now:")
+		fmt.Fprintln(w, "  systemctl --user start agentsh")
+		fmt.Fprintln(w)
+	}
 	fmt.Fprintln(w, "To check status:")
 	fmt.Fprintln(w, "  systemctl --user status agentsh")
 	fmt.Fprintln(w, "  agentsh daemon status")
@@ -324,6 +336,22 @@ func uninstallSystemdService(cmd *cobra.Command) error {
 
 	fmt.Fprintln(w, "Service uninstalled successfully")
 	return nil
+}
+
+// restartSystemdIfActive restarts the agentsh user unit only when it is
+// currently active, so install is never the thing that first starts the
+// daemon on Linux. The bool reports whether a restart occurred. is-active is
+// queried via Output() rather than runSystemctl so "inactive" does not leak
+// to the terminal.
+func restartSystemdIfActive() (bool, error) {
+	out, err := exec.Command("systemctl", "--user", "is-active", "agentsh").Output()
+	if err != nil || strings.TrimSpace(string(out)) != "active" {
+		return false, nil
+	}
+	if err := runSystemctl("restart", "agentsh"); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func runSystemctl(action, service string) error {

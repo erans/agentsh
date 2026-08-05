@@ -154,3 +154,62 @@ func TestInstallLaunchd_LoadFailureIsError(t *testing.T) {
 		t.Errorf("error should include launchctl diagnostic output: %v", err)
 	}
 }
+
+func TestInstallSystemd_RestartsActiveUnit(t *testing.T) {
+	callsFile := setupFakeTools(t, "", `[ "$2" = "is-active" ] && { echo active; exit 0; }`)
+	cmd, buf := newTestCmd()
+
+	if err := installSystemdService(cmd, true); err != nil {
+		t.Fatalf("install failed: %v", err)
+	}
+
+	assertCalls(t, recordedCalls(t, callsFile), []string{
+		"systemctl --user daemon-reload",
+		"systemctl --user enable agentsh",
+		"systemctl --user is-active agentsh",
+		"systemctl --user restart agentsh",
+	})
+	unitPath := filepath.Join(os.Getenv("HOME"), ".config", "systemd", "user", "agentsh.service")
+	if _, err := os.Stat(unitPath); err != nil {
+		t.Errorf("unit not written inside sandbox HOME: %v", err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "Service restarted with updated configuration") {
+		t.Errorf("missing restart message, got: %s", out)
+	}
+	if strings.Contains(out, "To start the daemon now") {
+		t.Errorf("start hint should be suppressed after a restart, got: %s", out)
+	}
+}
+
+func TestInstallSystemd_InactiveUnitNotRestarted(t *testing.T) {
+	callsFile := setupFakeTools(t, "", `[ "$2" = "is-active" ] && { echo inactive; exit 3; }`)
+	cmd, buf := newTestCmd()
+
+	if err := installSystemdService(cmd, false); err != nil {
+		t.Fatalf("install failed: %v", err)
+	}
+
+	for _, call := range recordedCalls(t, callsFile) {
+		if strings.Contains(call, " restart ") || strings.HasSuffix(call, " restart agentsh") {
+			t.Errorf("unexpected restart call: %s", call)
+		}
+	}
+	if !strings.Contains(buf.String(), "To start the daemon now") {
+		t.Errorf("start hint should be preserved when unit inactive, got: %s", buf.String())
+	}
+}
+
+func TestInstallSystemd_RestartFailureIsError(t *testing.T) {
+	setupFakeTools(t, "", `[ "$2" = "is-active" ] && { echo active; exit 0; }
+[ "$2" = "restart" ] && exit 1`)
+	cmd, _ := newTestCmd()
+
+	err := installSystemdService(cmd, true)
+	if err == nil {
+		t.Fatal("expected error when systemctl restart fails")
+	}
+	if !strings.Contains(err.Error(), "systemctl --user restart agentsh") {
+		t.Errorf("error should include manual remediation: %v", err)
+	}
+}
