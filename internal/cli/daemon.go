@@ -230,6 +230,7 @@ func installSystemdService(cmd *cobra.Command, force bool) error {
 	if err != nil {
 		return fmt.Errorf("get current user: %w", err)
 	}
+	home := userHomeDir()
 
 	// Get agentsh binary path
 	exePath, err := os.Executable()
@@ -242,7 +243,7 @@ func installSystemdService(cmd *cobra.Command, force bool) error {
 	}
 
 	// Ensure systemd user directory exists
-	systemdDir := filepath.Join(currentUser.HomeDir, ".config", "systemd", "user")
+	systemdDir := filepath.Join(home, ".config", "systemd", "user")
 	if err := os.MkdirAll(systemdDir, 0755); err != nil {
 		return fmt.Errorf("create systemd directory: %w", err)
 	}
@@ -257,7 +258,7 @@ func installSystemdService(cmd *cobra.Command, force bool) error {
 	}
 
 	// Data directory for read-write access
-	dataDir := filepath.Join(currentUser.HomeDir, ".local", "share", "agentsh")
+	dataDir := filepath.Join(home, ".local", "share", "agentsh")
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		return fmt.Errorf("create data directory: %w", err)
 	}
@@ -265,7 +266,7 @@ func installSystemdService(cmd *cobra.Command, force bool) error {
 	// Generate service content
 	serviceContent := fmt.Sprintf(systemdServiceTemplate,
 		exePath,
-		currentUser.HomeDir,
+		home,
 		currentUser.Uid,
 		dataDir,
 	)
@@ -304,12 +305,7 @@ func installSystemdService(cmd *cobra.Command, force bool) error {
 func uninstallSystemdService(cmd *cobra.Command) error {
 	w := cmd.OutOrStdout()
 
-	currentUser, err := user.Current()
-	if err != nil {
-		return fmt.Errorf("get current user: %w", err)
-	}
-
-	servicePath := filepath.Join(currentUser.HomeDir, ".config", "systemd", "user", "agentsh.service")
+	servicePath := filepath.Join(userHomeDir(), ".config", "systemd", "user", "agentsh.service")
 
 	// Stop service if running
 	_ = runSystemctl("stop", "agentsh")
@@ -388,10 +384,7 @@ func getLaunchdPlistPath() string {
 func installLaunchdService(cmd *cobra.Command, force bool) error {
 	w := cmd.OutOrStdout()
 
-	currentUser, err := user.Current()
-	if err != nil {
-		return fmt.Errorf("get current user: %w", err)
-	}
+	home := userHomeDir()
 
 	exePath, err := os.Executable()
 	if err != nil {
@@ -403,7 +396,7 @@ func installLaunchdService(cmd *cobra.Command, force bool) error {
 	}
 
 	// Ensure LaunchAgents directory exists
-	launchAgentsDir := filepath.Join(currentUser.HomeDir, "Library", "LaunchAgents")
+	launchAgentsDir := filepath.Join(home, "Library", "LaunchAgents")
 	if err := os.MkdirAll(launchAgentsDir, 0755); err != nil {
 		return fmt.Errorf("create LaunchAgents directory: %w", err)
 	}
@@ -417,7 +410,7 @@ func installLaunchdService(cmd *cobra.Command, force bool) error {
 	}
 
 	// Log directory
-	logDir := filepath.Join(currentUser.HomeDir, "Library", "Logs", "agentsh")
+	logDir := filepath.Join(home, "Library", "Logs", "agentsh")
 	if err := os.MkdirAll(logDir, 0755); err != nil {
 		return fmt.Errorf("create log directory: %w", err)
 	}
@@ -426,7 +419,7 @@ func installLaunchdService(cmd *cobra.Command, force bool) error {
 		exePath,
 		logDir,
 		logDir,
-		currentUser.HomeDir,
+		home,
 	)
 
 	if err := os.WriteFile(plistPath, []byte(plistContent), 0644); err != nil {
