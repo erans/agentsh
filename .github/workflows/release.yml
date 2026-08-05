@@ -383,6 +383,12 @@ jobs:
           cp macos/AgentSH/AgentSH_Distribution.provisionprofile \
             "build/AgentSH.app/Contents/embedded.provisionprofile"
 
+          # SysExt provisioning profile (required for the restricted
+          # endpoint-security.client entitlement; without it AMFI refuses to
+          # exec the extension on user machines — issue #436)
+          cp macos/AgentSH/AgentSH_SysExt_Distribution.provisionprofile \
+            "build/AgentSH.app/Contents/Library/SystemExtensions/ai.canyonroad.agentsh.SysExt.systemextension/Contents/embedded.provisionprofile"
+
           # Default config and policies (used as fallback when no user/system config exists)
           cp config.yml "build/AgentSH.app/Contents/Resources/"
           cp default-policy.yml "build/AgentSH.app/Contents/Resources/"
