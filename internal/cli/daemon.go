@@ -205,7 +205,7 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=%s server --daemon
+ExecStart=%s server
 Restart=on-failure
 RestartSec=5
 Environment=HOME=%s
@@ -359,7 +359,6 @@ const launchdPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
     <array>
         <string>%s</string>
         <string>server</string>
-        <string>--daemon</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

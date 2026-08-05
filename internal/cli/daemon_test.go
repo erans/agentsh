@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"fmt"
 	"os"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -261,3 +263,92 @@ func TestGetCurrentSession(t *testing.T) {
 		t.Errorf("expected platform %q, got %q", expectedPlatform, session.Platform)
 	}
 }
+
+// launchdProgramArgsRE captures the body of the ProgramArguments <array>.
+var launchdProgramArgsRE = regexp.MustCompile(`(?s)<key>ProgramArguments</key>\s*<array>(.*?)</array>`)
+
+// plistStringRE captures individual <string> values.
+var plistStringRE = regexp.MustCompile(`<string>(.*?)</string>`)
+
+// argvFromSystemdUnit returns the arguments systemd would pass to the binary,
+// with argv[0] (the executable path) removed.
+func argvFromSystemdUnit(t *testing.T, unit string) []string {
+	t.Helper()
+	for _, line := range strings.Split(unit, "\n") {
+		rest, ok := strings.CutPrefix(line, "ExecStart=")
+		if !ok {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			t.Fatal("ExecStart= line has no command")
+		}
+		return fields[1:]
+	}
+	t.Fatal("unit file has no ExecStart= line")
+	return nil
+}
+
+// argvFromLaunchdPlist returns the arguments launchd would pass to the binary,
+// with argv[0] (the executable path) removed.
+func argvFromLaunchdPlist(t *testing.T, plist string) []string {
+	t.Helper()
+	block := launchdProgramArgsRE.FindStringSubmatch(plist)
+	if block == nil {
+		t.Fatal("plist has no ProgramArguments <array>")
+	}
+	var argv []string
+	for _, m := range plistStringRE.FindAllStringSubmatch(block[1], -1) {
+		argv = append(argv, m[1])
+	}
+	if len(argv) == 0 {
+		t.Fatal("ProgramArguments <array> is empty")
+	}
+	return argv[1:]
+}
+
+// TestDaemonTemplates_GenerateRunnableCommand renders each unit template and
+// dry-parses the resulting argv against the real root command. It never starts
+// a server or binds a port. This guards the whole failure class behind issue
+// #437: an unregistered flag, a renamed or removed `server` subcommand, and a
+// structurally broken ExecStart / ProgramArguments all fail here.
+func TestDaemonTemplates_GenerateRunnableCommand(t *testing.T) {
+	const exePath = "/usr/local/bin/agentsh"
+
+	systemdUnit := fmt.Sprintf(systemdServiceTemplate,
+		exePath, "/home/testuser", "1000", "/home/testuser/.local/share/agentsh")
+	launchdPlist := fmt.Sprintf(launchdPlistTemplate,
+		exePath, "/home/testuser/Library/Logs/agentsh",
+		"/home/testuser/Library/Logs/agentsh", "/home/testuser")
+
+	for _, tc := range []struct {
+		name string
+		argv []string
+	}{
+		{"systemd", argvFromSystemdUnit(t, systemdUnit)},
+		{"launchd", argvFromLaunchdPlist(t, launchdPlist)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if len(tc.argv) == 0 {
+				t.Fatal("generated unit invokes the binary with no subcommand")
+			}
+
+			root := NewRoot("test")
+			found, rest, err := root.Find(tc.argv)
+			if err != nil {
+				t.Fatalf("argv %q does not resolve to a command: %v", tc.argv, err)
+			}
+			// Find falls back to the root command when the subcommand does not
+			// exist, so an explicit check is required to catch a rename.
+			if found == root {
+				t.Fatalf("argv %q does not resolve to a subcommand (was %q renamed or removed?)",
+					tc.argv, tc.argv[0])
+			}
+			if err := found.ParseFlags(rest); err != nil {
+				t.Fatalf("generated unit runs `%s %s`, which fails to parse: %v",
+					found.Name(), strings.Join(rest, " "), err)
+			}
+		})
+	}
+}
+
