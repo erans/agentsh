@@ -87,15 +87,19 @@ package-release:
 # NOTE: build-swift, assemble-bundle, and sign-bundle require macOS with Xcode
 # =============================================================================
 
-# Build Go binary for macOS (CGO disabled for cross-compilation)
+# Build the Go binaries that ship in the app bundle. agentsh needs CGO for
+# system extension support (nofuse: no macFUSE headers required), matching
+# the release pipeline's rebuild.
 build-macos-go:
-	mkdir -p build/AgentSH.app/Contents/MacOS
-	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o build/AgentSH.app/Contents/MacOS/agentsh ./cmd/agentsh
+	mkdir -p build/go-local
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -tags nofuse $(LDFLAGS) -o build/go-local/agentsh ./cmd/agentsh
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o build/go-local/agentsh-shell-shim ./cmd/agentsh-shell-shim
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o build/go-local/agentsh-stub ./cmd/agentsh-stub
 
 # Build Swift components via Xcode (requires macOS with Xcode)
 build-swift:
 	xcodebuild \
-		-project macos/agentsh/agentsh.xcodeproj \
+		-project macos/AgentSH/agentsh.xcodeproj \
 		-scheme agentsh \
 		-configuration Release \
 		-derivedDataPath build/DerivedData \
@@ -103,44 +107,18 @@ build-swift:
 		CODE_SIGNING_REQUIRED=NO \
 		CODE_SIGNING_ALLOWED=NO
 
-# Assemble app bundle
+# Assemble app bundle (shared logic: scripts/assemble-macos-bundle.sh)
 assemble-bundle: build-macos-go build-swift
-	mkdir -p build/AgentSH.app/Contents/{Library/SystemExtensions,XPCServices,Resources}
-	cp macos/AgentSH-files/Info.plist build/AgentSH.app/Contents/
-	cp -R build/DerivedData/Build/Products/Release/SysExt.systemextension \
-		build/AgentSH.app/Contents/Library/SystemExtensions/
-	cp -R build/DerivedData/Build/Products/Release/xpc.xpc \
-		build/AgentSH.app/Contents/XPCServices/
-	cp -R build/DerivedData/Build/Products/Release/approval-dialog.app \
-		build/AgentSH.app/Contents/Resources/
+	GO_BIN_DIR=build/go-local scripts/assemble-macos-bundle.sh build/AgentSH.app
 
-# Sign bundle (requires SIGNING_IDENTITY env var)
+# Sign bundle (requires SIGNING_IDENTITY env var; shared logic:
+# scripts/sign-macos-bundle.sh)
 sign-bundle:
-	for bin in build/AgentSH.app/Contents/MacOS/*; do \
-		echo "Signing $$(basename $$bin)"; \
-		codesign --force --sign "$(SIGNING_IDENTITY)" \
-			--options runtime --timestamp \
-			"$$bin"; \
-	done
-	codesign --force --sign "$(SIGNING_IDENTITY)" \
-		--entitlements macos/agentsh/SysExt.entitlements \
-		--options runtime --timestamp \
-		build/AgentSH.app/Contents/Library/SystemExtensions/SysExt.systemextension
-	codesign --force --sign "$(SIGNING_IDENTITY)" \
-		--options runtime --timestamp \
-		build/AgentSH.app/Contents/XPCServices/xpc.xpc
-	codesign --force --sign "$(SIGNING_IDENTITY)" \
-		--entitlements macos/agentsh/approval-dialog/approval-dialog.entitlements \
-		--options runtime --timestamp \
-		build/AgentSH.app/Contents/Resources/approval-dialog.app
-	codesign --force --sign "$(SIGNING_IDENTITY)" \
-		--entitlements macos/agentsh/agentsh/agentsh.entitlements \
-		--options runtime --timestamp \
-		build/AgentSH.app
-	codesign --verify --deep --strict --verbose=2 build/AgentSH.app
+	scripts/sign-macos-bundle.sh build/AgentSH.app
 
-# Full enterprise build
+# Full enterprise build, gated on provisioning-profile verification (#440)
 build-macos-enterprise: assemble-bundle sign-bundle
+	scripts/verify-macos-bundle.sh build/AgentSH.app
 	@echo "Enterprise build complete: build/AgentSH.app"
 
 # =============================================================================
