@@ -85,10 +85,13 @@ Steps:
 Inside-out signing. Requires `SIGNING_IDENTITY` in the environment. All
 signing uses `--force --options runtime --timestamp`.
 
-1. Each binary in `Contents/MacOS/`: `agentsh` signs with
-   `macos/AgentSH/agentsh/agentsh.entitlements`; all others (shim, stub)
-   sign with no entitlements. This mirrors release.yml's per-binary
-   entitlement selection.
+1. Each binary in `Contents/MacOS/`: `agentsh-shell-shim` signs with no
+   entitlements; every other binary (`agentsh`, `agentsh-stub`) signs with
+   `macos/AgentSH/agentsh/agentsh.entitlements`. This is release.yml's
+   exact selection rule, preserved verbatim — including the fact that
+   `agentsh-stub` carries the restricted `system-extension.install`
+   entitlement today. Whether the stub *should* carry it is a separate
+   question, out of scope here (see Out of scope).
 2. The sysext, with `macos/AgentSH/SysExt.entitlements`.
 3. `xpc.xpc`, no entitlements.
 4. `approval-dialog.app`, with
@@ -107,7 +110,11 @@ All repo paths use canonical case (`macos/AgentSH/...`).
 - The "Create and sign universal Go binaries" step keeps its lipo logic and
   drops its codesign loop: the shared sign script signs those binaries
   post-assembly, and a later `--force` re-sign would overwrite the earlier
-  signatures anyway. The step's zero-binaries sanity check stays.
+  signatures anyway. The step's zero-binaries sanity check stays, but
+  becomes a count of lipo outputs rather than of signed binaries. Dropping
+  the loop also drops its per-binary `codesign --verify --strict` and
+  `lipo -info` diagnostics; the final `codesign --verify --deep --strict`
+  in the sign script subsumes the former.
 - Fix the `xcodebuild -project` path case to
   `macos/AgentSH/agentsh.xcodeproj`.
 - The existing "Verify provisioning profiles" step is unchanged.
@@ -123,7 +130,8 @@ tag.
   - `agentsh` with `CGO_ENABLED=1 -tags nofuse` (matches release.yml's
     system-extension-support rebuild),
   - `agentsh-shell-shim` and `agentsh-stub` with `CGO_ENABLED=0`.
-- `assemble-bundle`:
+- `assemble-bundle`: keeps its `build-macos-go build-swift` prerequisites;
+  recipe becomes
   `GO_BIN_DIR=build/go-local scripts/assemble-macos-bundle.sh build/AgentSH.app`.
 - `sign-bundle`: `scripts/sign-macos-bundle.sh build/AgentSH.app`.
 - `build-macos-enterprise`: assemble + sign, then
@@ -153,10 +161,10 @@ Both scripts run `set -euo pipefail` and preflight with actionable errors:
 - **Assemble smoke test**, runnable anywhere (no Xcode, no identity): fake
   `PRODUCTS_DIR` and `GO_BIN_DIR` with stub files, run
   `assemble-macos-bundle.sh`, assert the expected bundle tree including
-  both `embedded.provisionprofile` files. Wire it into Linux CI: Linux
-  filesystems are case-sensitive, so this permanently catches the
-  `macos/agentsh` vs `macos/AgentSH` bug class that macOS runners cannot
-  see.
+  both `embedded.provisionprofile` files. Wire it into
+  `.github/workflows/ci.yml` as a Linux job step: Linux filesystems are
+  case-sensitive, so this permanently catches the `macos/agentsh` vs
+  `macos/AgentSH` bug class that macOS runners cannot see.
 - Signing and verification need Xcode plus a signing identity: acceptance
   is `make build-macos-enterprise` passing the verify gate on a developer
   Mac, and the next release tag exercising the extracted release path.
@@ -165,3 +173,8 @@ Both scripts run `set -euo pipefail` and preflight with actionable errors:
 
 Local notarization, universal (multi-arch) local binaries, local DMG
 creation, and `agentsh-macwrap` (commented out in `.goreleaser.yml`).
+Also out of scope: changing which entitlements `agentsh-stub` is signed
+with — today release signs it with the restricted
+`system-extension.install` entitlement, and this spec preserves that
+verbatim; dropping it would change shipped signatures and deserves its own
+issue.
