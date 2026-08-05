@@ -428,6 +428,9 @@ jobs:
           # 5. Verify
           codesign --verify --deep --strict --verbose=2 "build/AgentSH.app"
 
+      - name: Verify provisioning profiles
+        run: scripts/verify-macos-bundle.sh build/AgentSH.app
+
       - name: Notarize app bundle
         env:
           APPLE_ID: ${{ secrets.MACOS_NOTARIZATION_APPLE_ID }}
