@@ -140,7 +140,7 @@ func TestInstallLaunchd_ExistingPlistWithoutForce(t *testing.T) {
 }
 
 func TestInstallLaunchd_LoadFailureIsError(t *testing.T) {
-	setupFakeTools(t, `[ "$1" = "load" ] && exit 1`, "")
+	setupFakeTools(t, `[ "$1" = "load" ] && { echo "Load failed: 5: input/output error" >&2; exit 1; }`, "")
 	cmd, _ := newTestCmd()
 
 	err := installLaunchdService(cmd, false)
@@ -149,5 +149,8 @@ func TestInstallLaunchd_LoadFailureIsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), getLaunchdPlistPath()) {
 		t.Errorf("error should mention plist path: %v", err)
+	}
+	if !strings.Contains(err.Error(), "Load failed: 5") {
+		t.Errorf("error should include launchctl diagnostic output: %v", err)
 	}
 }

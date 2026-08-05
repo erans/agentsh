@@ -374,8 +374,7 @@ const launchdPlistTemplate = `<?xml version="1.0" encoding="UTF-8"?>
 `
 
 func getLaunchdPlistPath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "Library", "LaunchAgents", "ai.canyonroad.agentsh.daemon.plist")
+	return filepath.Join(userHomeDir(), "Library", "LaunchAgents", "ai.canyonroad.agentsh.daemon.plist")
 }
 
 // reloadLaunchdService replaces whatever job definition launchd currently
@@ -383,7 +382,14 @@ func getLaunchdPlistPath() string {
 // the expected case on a fresh install.
 func reloadLaunchdService(plistPath string) error {
 	_ = exec.Command("launchctl", "unload", plistPath).Run()
-	return exec.Command("launchctl", "load", plistPath).Run()
+	out, err := exec.Command("launchctl", "load", plistPath).CombinedOutput()
+	if err != nil {
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			return fmt.Errorf("%w: %s", err, msg)
+		}
+		return err
+	}
+	return nil
 }
 
 func installLaunchdService(cmd *cobra.Command, force bool) error {
