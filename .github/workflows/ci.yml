@@ -53,6 +53,9 @@ jobs:
       - name: smoke
         run: make smoke
 
+      - name: macOS bundle assemble smoke test
+        run: scripts/test-assemble-macos-bundle.sh
+
   test-macos:
     runs-on: macos-latest
     timeout-minutes: 15
