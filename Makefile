@@ -84,13 +84,14 @@ package-release:
 
 # =============================================================================
 # macOS Enterprise Build (System Extension + Network Extension)
-# NOTE: build-swift, assemble-bundle, and sign-bundle require macOS with Xcode
+# NOTE: build-macos-go, build-swift, assemble-bundle, and sign-bundle require macOS with Xcode
 # =============================================================================
 
 # Build the Go binaries that ship in the app bundle. agentsh needs CGO for
 # system extension support (nofuse: no macFUSE headers required), matching
 # the release pipeline's rebuild.
 build-macos-go:
+	rm -rf build/go-local
 	mkdir -p build/go-local
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=1 go build -tags nofuse $(LDFLAGS) -o build/go-local/agentsh ./cmd/agentsh
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build $(LDFLAGS) -o build/go-local/agentsh-shell-shim ./cmd/agentsh-shell-shim
