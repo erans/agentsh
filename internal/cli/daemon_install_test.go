@@ -190,11 +190,11 @@ func TestInstallSystemd_InactiveUnitNotRestarted(t *testing.T) {
 		t.Fatalf("install failed: %v", err)
 	}
 
-	for _, call := range recordedCalls(t, callsFile) {
-		if strings.Contains(call, " restart ") || strings.HasSuffix(call, " restart agentsh") {
-			t.Errorf("unexpected restart call: %s", call)
-		}
-	}
+	assertCalls(t, recordedCalls(t, callsFile), []string{
+		"systemctl --user daemon-reload",
+		"systemctl --user enable agentsh",
+		"systemctl --user is-active agentsh",
+	})
 	if !strings.Contains(buf.String(), "To start the daemon now") {
 		t.Errorf("start hint should be preserved when unit inactive, got: %s", buf.String())
 	}
@@ -211,5 +211,8 @@ func TestInstallSystemd_RestartFailureIsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "systemctl --user restart agentsh") {
 		t.Errorf("error should include manual remediation: %v", err)
+	}
+	if !strings.Contains(err.Error(), filepath.Join(".config", "systemd", "user", "agentsh.service")) {
+		t.Errorf("error should mention unit path: %v", err)
 	}
 }

@@ -342,7 +342,8 @@ func uninstallSystemdService(cmd *cobra.Command) error {
 // currently active, so install is never the thing that first starts the
 // daemon on Linux. The bool reports whether a restart occurred. is-active is
 // queried via Output() rather than runSystemctl so "inactive" does not leak
-// to the terminal.
+// to the terminal. Any query error (including a broken systemctl, which
+// already produced warnings above) is treated as not-active.
 func restartSystemdIfActive() (bool, error) {
 	out, err := exec.Command("systemctl", "--user", "is-active", "agentsh").Output()
 	if err != nil || strings.TrimSpace(string(out)) != "active" {
