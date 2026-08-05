@@ -352,3 +352,27 @@ func TestDaemonTemplates_GenerateRunnableCommand(t *testing.T) {
 	}
 }
 
+// TestServerCmd_AcceptsLegacyDaemonFlag pins the compatibility promise for unit
+// files generated before the fix for issue #437, which hardcode `server
+// --daemon`. Upgrading the binary does not rewrite those files, so the server
+// must keep tolerating the flag even though it no longer emits it.
+func TestServerCmd_AcceptsLegacyDaemonFlag(t *testing.T) {
+	cmd := newServerCmd()
+
+	if err := cmd.ParseFlags([]string{"--daemon"}); err != nil {
+		t.Fatalf("server must tolerate the legacy --daemon flag: %v", err)
+	}
+
+	f := cmd.Flags().Lookup("daemon")
+	if f == nil {
+		t.Fatal("expected a --daemon flag to be registered")
+	}
+	if f.Deprecated == "" {
+		t.Error("--daemon should be marked deprecated so it is not treated as supported")
+	}
+	if !f.Hidden {
+		t.Error("--daemon is a compatibility no-op and should not appear in --help")
+	}
+}
+
+
