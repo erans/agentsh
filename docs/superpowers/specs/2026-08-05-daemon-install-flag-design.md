@@ -90,7 +90,10 @@ real root command. No server starts and no port is bound.
 
 This covers the whole failure class rather than this one instance — an
 unregistered flag, a renamed or removed `server` subcommand, and a structurally
-broken `ExecStart` / `ProgramArguments` all fail the test.
+broken `ExecStart` / `ProgramArguments` all fail the test. Because the
+compatibility no-op (section 1) makes `--daemon` itself parse, `ParseFlags`
+succeeding is not sufficient on its own; the guard additionally asserts
+`--daemon` is absent from the extracted argv.
 
 A second, smaller test asserts `server --daemon` still parses and that the flag
 is hidden, pinning the compatibility promise from section 1 so a future cleanup

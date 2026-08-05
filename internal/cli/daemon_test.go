@@ -348,6 +348,15 @@ func TestDaemonTemplates_GenerateRunnableCommand(t *testing.T) {
 				t.Fatalf("generated unit runs `%s %s`, which fails to parse: %v",
 					found.Name(), strings.Join(rest, " "), err)
 			}
+
+			// The compatibility no-op on the server command means ParseFlags
+			// now accepts --daemon, so parsing alone no longer catches a
+			// template that reintroduces it. Assert its absence explicitly.
+			for _, arg := range rest {
+				if arg == "--daemon" {
+					t.Errorf("generated unit passes --daemon; the flag is a compatibility no-op for units already on disk, not something to emit in new ones")
+				}
+			}
 		})
 	}
 }

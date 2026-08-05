@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Make `agentsh daemon install` produce a service unit that actually starts, and repair installations already broken by the nonexistent `--daemon` flag.
+**Goal:** Make `agentsh daemon install` produce a service unit that no longer fails at flag parsing, and repair installations already broken by the nonexistent `--daemon` flag.
 
 **Architecture:** Two independent halves. Drop `--daemon` from the generated systemd and launchd templates so new installs are clean, and register `--daemon` on the `server` command as a hidden deprecated no-op so units already written to disk — which a binary upgrade does not rewrite — stop failing. A guard test renders each template, extracts the argv the service manager would exec, and dry-parses it against the real root command.
 
