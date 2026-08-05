@@ -103,6 +103,18 @@ Per bundle:
    correct bundle). Value-subset comparison is optional hardening, not
    required.
 
+6. **Required-claims check (added after code review of the initial
+   implementation):** each bundle must actually *claim* its load-bearing
+   restricted entitlements in its signature — the app must claim
+   `system-extension.install`; the sysext must claim
+   `endpoint-security.client` and `networking.networkextension`. Check 5
+   alone (claimed ⊆ granted) false-passes when a signing regression drops
+   entitlements from the signature entirely — e.g. the wrong
+   `--entitlements` file at the codesign step — because the profile then
+   grants everything the reduced signature claims, while the shipped
+   extension cannot create an ES client and enforcement is silently absent
+   on user machines: the same failure character as #436 itself.
+
 The restricted set is hardcoded because Apple publishes no machine-readable
 classification of restricted entitlements; these three are the ones this
 project uses. Adding a new restricted entitlement means adding it to the
@@ -145,6 +157,7 @@ a bundle AMFI would reject, and no broken DMG reaches the release.
 | Info.plist missing or unreadable | Failure |
 | Profile expired | Failure |
 | Profile expires within 90 days | Warning only (exit unaffected) |
+| Required entitlement not claimed by the signature | Failure |
 | Run on non-macOS | Immediate error, distinct exit message |
 
 The script never warns-and-passes on any condition that gates AMFI

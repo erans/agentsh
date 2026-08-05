@@ -328,6 +328,107 @@ Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
 
 ---
 
+### Task 1b: Required-claims check (from Task 1 code review)
+
+Code review of Task 1 found a design gap: check 5 verifies claimed ⊆ granted, but nothing verifies the load-bearing entitlements are *claimed* at all. A signing regression (wrong `--entitlements` file) would pass the gate while shipping a sysext that cannot create an ES client. Spec updated (check 6). This task extends the committed script; its fixture expectations **supersede Task 1 steps 4–5 summary counts**.
+
+**Files:**
+- Modify: `scripts/verify-macos-bundle.sh`
+
+- [ ] **Step 1: Make three edits to the script**
+
+Edit 1 — in the header comment block, after the `# Usage:` line, add:
+
+```bash
+#
+# Requires macOS 12+ (codesign --xml needs 11+, plutil -extract raw needs 12+).
+```
+
+Edit 2 — change the misleading diagnostic (it also fires for a signed bundle with zero entitlements):
+
+```bash
+    fail "$label: cannot read signed entitlements (unsigned bundle?)"
+```
+becomes
+```bash
+    fail "$label: cannot read signed entitlements (unsigned, ad-hoc, or signed with no entitlements)"
+```
+
+Edit 3 — insert the required-claims check between the `sig_team=` assignment and the `# Check 1:` comment:
+
+```bash
+  # Check 6: each bundle must actually CLAIM its load-bearing restricted
+  # entitlements. Check 5 alone (claimed ⊆ granted) false-passes when a
+  # signing regression drops entitlements from the signature entirely —
+  # the wrong --entitlements file ships a sysext that cannot create an ES
+  # client, silently (same failure character as #436).
+  local required_ents=""
+  case "$label" in
+    app)    required_ents="com.apple.developer.system-extension.install" ;;
+    sysext) required_ents="com.apple.developer.endpoint-security.client com.apple.developer.networking.networkextension" ;;
+  esac
+  if [ "$have_ents" -eq 1 ]; then
+    for ent in $required_ents; do
+      if "$PLISTBUDDY" -c "Print :$ent" "$ents" >/dev/null 2>&1; then
+        pass "$label: signature claims required entitlement $ent"
+      else
+        fail "$label: signature does NOT claim required entitlement $ent (wrong entitlements file at signing?)"
+      fi
+    done
+  fi
+```
+
+Placement matters: it must run **before** check 1's missing-profile early `return`, so a bundle with no profile still gets its claims verified.
+
+- [ ] **Step 2: Syntax check**
+
+Run: `/bin/bash -n scripts/verify-macos-bundle.sh && echo "syntax ok"` — expected `syntax ok`.
+
+- [ ] **Step 3: Re-run the broken fixture (Task 1 step 4 build)**
+
+Rebuild the Task 1 step 4 fixture exactly as before (ad-hoc signed, no profiles), then:
+
+```bash
+scripts/verify-macos-bundle.sh "$FIX"; echo "exit=$?"
+```
+
+Expected: `exit=1`, summary `== summary: 3 ok, 0 warning(s), 5 failure(s)`. Same five failures as Task 1 step 4, plus these three new passes:
+- `app: signature claims required entitlement com.apple.developer.system-extension.install`
+- `sysext: signature claims required entitlement com.apple.developer.endpoint-security.client`
+- `sysext: signature claims required entitlement com.apple.developer.networking.networkextension`
+
+- [ ] **Step 4: Re-run the profiled fixture (Task 1 step 5 build)**
+
+Embed both real profiles and re-sign as in Task 1 step 5, then run. Expected: `exit=1`, summary `== summary: 14 ok, 0 warning(s), 2 failure(s)` — the 11 passes from Task 1 step 5 plus the 3 claims passes; still exactly the two ad-hoc team failures.
+
+- [ ] **Step 5: Simulate the regression this check exists for**
+
+Re-sign the fixture's sysext with the WRONG entitlements file (the app's):
+
+```bash
+codesign -s - -f --entitlements macos/AgentSH/agentsh/agentsh.entitlements "$SX"
+scripts/verify-macos-bundle.sh "$FIX"; echo "exit=$?"
+```
+
+Expected: `exit=1`, summary `== summary: 10 ok, 0 warning(s), 5 failure(s)`, and the sysext failures are exactly:
+- `sysext: signature does NOT claim required entitlement com.apple.developer.endpoint-security.client (wrong entitlements file at signing?)`
+- `sysext: signature does NOT claim required entitlement com.apple.developer.networking.networkextension (wrong entitlements file at signing?)`
+- `sysext: code signature has no team identifier (ad-hoc or unsigned?)`
+- `sysext: restricted entitlement com.apple.developer.system-extension.install claimed by signature but NOT granted by profile (AMFI will reject at exec)`
+
+(plus the unchanged `app: code signature has no team identifier` failure). Before this task, this exact scenario produced only the team failure — the gate would have passed a properly-signed equivalent.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add scripts/verify-macos-bundle.sh
+git commit -m "feat(release): require load-bearing entitlement claims in verify-macos-bundle.sh (#436)
+
+Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>"
+```
+
+---
+
 ### Task 2: Embed the SysExt profile in the release workflow
 
 **Files:**
