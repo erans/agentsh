@@ -171,6 +171,27 @@ old "install the app bundle" wording. `GenerateTips` has no non-test callers
   from `esf ✓ / 90` to `esf ✗` with the launchctl tip and mode falls back to
   `lima`; after the sysext is repaired (`state = running`), `esf ✓` returns.
 
+## Execution amendments
+
+Deltas from this spec adopted during implementation code review (committed code
+is authoritative):
+
+1. `SysExtLiveness` gained a `ProbeFailed bool` field — set on every
+   probe-failure path (command error, missing team ID, unparseable state) so
+   consumers can distinguish "cleanly not activated" from "couldn't verify"
+   without matching Detail string literals.
+2. When `systemextensionsctl` itself fails, Detail is
+   `not activated (liveness could not be verified: systemextensionsctl failed: …)`
+   — carrying the "could not be verified" token so the reason-sensitive tips
+   route to the diagnostics tip instead of the misleading install tip.
+3. `runLivenessCommand` folds captured stderr (whitespace-collapsed to a
+   single line) into returned errors, and reports timeouts as
+   `timed out after 5s` instead of `signal: killed` — Detail stays a
+   one-liner while carrying the tool's actual message.
+4. The no-state-line Detail appends `(last exit: …)` when launchctl output
+   carried an exit reason despite lacking a parseable state, so an AMFI
+   reason still reaches the tips layer on that path.
+
 ## Out of scope / follow-ups
 
 - **Server-side functional check:** report/warn when the server runs in esf

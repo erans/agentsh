@@ -349,6 +349,8 @@ git commit -m "feat(#441): parseLaunchdState — first state line + last-exit ex
 
 ### Task 3: `CheckSysExtLiveness` — fail-closed decision table
 
+> **Amended during execution** (see the Task 3 commit): the decision-table test grew to 9 rows with `wantState`/`wantLastExit` columns, single-line/non-empty Detail invariant assertions, and mutation-verified pins on the exact `state == "running"` gate and the blank-team-ID guard. Code deltas: the systemextensionsctl-failure Detail now carries the "could not be verified" token (tips routing), the no-state branch appends `(last exit: …)` when present, timeouts report as `timed out after 5s`, and the branch switch reads `switch state`. The committed code is authoritative over the blocks below.
+
 **Files:**
 - Modify: `internal/platform/darwin/sysext_liveness.go` (append function)
 - Modify: `internal/platform/darwin/sysext_liveness_test.go` (append test)
