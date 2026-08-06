@@ -3,8 +3,21 @@
 package darwin
 
 import (
+	"errors"
+	"strings"
 	"testing"
 )
+
+// state = running while launchd still remembers an older crash (runs > 1).
+const launchdRunningAfterCrash = `system/WCKWMMKJ35.ai.canyonroad.agentsh.SysExt = {
+	active count = 1
+	state = running
+
+	pid = 4242
+	runs = 199773
+	last exit code = 1
+}
+`
 
 func TestNewSysExtManager(t *testing.T) {
 	m := NewSysExtManager()
@@ -96,96 +109,13 @@ func TestFindAppBundle_FromWithinBundle(t *testing.T) {
 	}
 }
 
-func TestContains(t *testing.T) {
-	tests := []struct {
-		name   string
-		s      string
-		substr string
-		want   bool
-	}{
-		{
-			name:   "empty string and empty substr",
-			s:      "",
-			substr: "",
-			want:   true,
-		},
-		{
-			name:   "empty string with non-empty substr",
-			s:      "",
-			substr: "foo",
-			want:   false,
-		},
-		{
-			name:   "non-empty string with empty substr",
-			s:      "foo",
-			substr: "",
-			want:   true,
-		},
-		{
-			name:   "substr at start",
-			s:      "hello world",
-			substr: "hello",
-			want:   true,
-		},
-		{
-			name:   "substr at end",
-			s:      "hello world",
-			substr: "world",
-			want:   true,
-		},
-		{
-			name:   "substr in middle",
-			s:      "hello world",
-			substr: "lo wo",
-			want:   true,
-		},
-		{
-			name:   "substr not present",
-			s:      "hello world",
-			substr: "foo",
-			want:   false,
-		},
-		{
-			name:   "substr longer than string",
-			s:      "hi",
-			substr: "hello",
-			want:   false,
-		},
-		{
-			name:   "exact match",
-			s:      "hello",
-			substr: "hello",
-			want:   true,
-		},
-		{
-			name:   "real systemextensionsctl output with bundle ID",
-			s:      "1 extension(s)\n--- com.apple.system_extension.endpoint_security\nai.canyonroad.agentsh.SysExt	team_id	activated enabled",
-			substr: "ai.canyonroad.agentsh.SysExt",
-			want:   true,
-		},
-		{
-			name:   "real systemextensionsctl output check running state",
-			s:      "ai.canyonroad.agentsh.SysExt	team_id	activated enabled",
-			substr: "activated enabled",
-			want:   true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := contains(tt.s, tt.substr)
-			if got != tt.want {
-				t.Errorf("contains(%q, %q) = %v, want %v", tt.s, tt.substr, got, tt.want)
-			}
-		})
-	}
-}
-
 func TestSysExtStatus_JSONTags(t *testing.T) {
 	// Verify that SysExtStatus has the expected structure
 	status := SysExtStatus{
 		Installed:   true,
 		Running:     true,
+		State:       "running",
+		LastExit:    "",
 		Version:     "1.0.0",
 		BundleID:    "ai.canyonroad.agentsh.SysExt",
 		ExtensionID: "ext-123",
@@ -207,5 +137,77 @@ func TestSysExtStatus_JSONTags(t *testing.T) {
 	}
 	if status.ExtensionID != "ext-123" {
 		t.Error("ExtensionID mismatch")
+	}
+	if status.State != "running" {
+		t.Error("State mismatch")
+	}
+}
+
+func TestSysExtManager_Status_LivenessMapping(t *testing.T) {
+	restore := runLivenessCommand
+	defer func() { runLivenessCommand = restore }()
+
+	m := &SysExtManager{bundlePath: "/tmp", bundleID: "ai.canyonroad.agentsh.SysExt"}
+
+	tests := []struct {
+		name            string
+		sysextFails     bool   // true: systemextensionsctl itself fails, so Activated stays false
+		launchctlOut    string // "" injects a launchctl command failure (ignored when sysextFails)
+		wantInstalled   bool
+		wantRunning     bool
+		wantErrSub      string // "" means Error must be empty
+		wantLastExit    string
+		wantState       string
+		wantProbeFailed bool
+	}{
+		{"activated but spawn scheduled", false, launchdSpawnScheduled, true, false, "activated but not running", "exit code 1", "spawn scheduled", false},
+		{"activated and running suppresses historical exit", false, launchdRunningAfterCrash, true, true, "", "", "running", false},
+		{"launchctl failure -> probe failed", false, "", true, false, "could not be verified", "", "", true},
+		// Activated=false here (systemextensionsctl itself failed), so this is
+		// the only row where the `liveness.ProbeFailed ||` half of the Error
+		// condition is load-bearing: the `Activated && !Running` half alone
+		// would not fire since Activated is false.
+		{"systemextensionsctl failure -> not activated, probe failed, error still populated", true, "", false, false, "could not be verified", "", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			runLivenessCommand = func(name string, args ...string) (string, error) {
+				if name == "systemextensionsctl" {
+					if tt.sysextFails {
+						return "", errors.New("no such process")
+					}
+					return sysextListBoth, nil
+				}
+				if tt.launchctlOut == "" {
+					return "", errors.New("Could not find service")
+				}
+				return tt.launchctlOut, nil
+			}
+			status, err := m.Status()
+			if err != nil {
+				t.Fatalf("Status() error = %v", err)
+			}
+			if status.Installed != tt.wantInstalled {
+				t.Errorf("Installed = %v, want %v", status.Installed, tt.wantInstalled)
+			}
+			if status.Running != tt.wantRunning {
+				t.Errorf("Running = %v, want %v", status.Running, tt.wantRunning)
+			}
+			if tt.wantErrSub == "" && status.Error != "" {
+				t.Errorf("Error = %q, want empty", status.Error)
+			}
+			if tt.wantErrSub != "" && !strings.Contains(status.Error, tt.wantErrSub) {
+				t.Errorf("Error = %q, want substring %q", status.Error, tt.wantErrSub)
+			}
+			if status.LastExit != tt.wantLastExit {
+				t.Errorf("LastExit = %q, want %q (historical exits are suppressed while running)", status.LastExit, tt.wantLastExit)
+			}
+			if status.State != tt.wantState {
+				t.Errorf("State = %q, want %q", status.State, tt.wantState)
+			}
+			if status.ProbeFailed != tt.wantProbeFailed {
+				t.Errorf("ProbeFailed = %v, want %v", status.ProbeFailed, tt.wantProbeFailed)
+			}
+		})
 	}
 }

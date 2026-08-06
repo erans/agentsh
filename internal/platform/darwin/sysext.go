@@ -6,15 +6,17 @@ package darwin
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
 // SysExtStatus represents the state of the System Extension.
 type SysExtStatus struct {
-	Installed   bool   `json:"installed"`
-	Running     bool   `json:"running"`
+	Installed   bool   `json:"installed"`              // true once systemextensionsctl reports the extension activated; does not imply Running
+	Running     bool   `json:"running"`                // true only on positive proof the launchd service state is "running"
+	ProbeFailed bool   `json:"probe_failed,omitempty"` // a liveness probe command failed or its output was unparseable
+	State       string `json:"state,omitempty"`        // raw launchd state ("running", "spawn scheduled", ...); "" if unknown
+	LastExit    string `json:"last_exit,omitempty"`    // last recorded launchd exit; suppressed while Running is true
 	Version     string `json:"version,omitempty"`
 	BundleID    string `json:"bundle_id,omitempty"`
 	ExtensionID string `json:"extension_id,omitempty"`
@@ -35,7 +37,7 @@ func NewSysExtManager() *SysExtManager {
 
 	return &SysExtManager{
 		bundlePath: bundlePath,
-		bundleID:   "ai.canyonroad.agentsh.SysExt",
+		bundleID:   sysExtBundleID,
 	}
 }
 
@@ -64,6 +66,18 @@ func findAppBundle(execPath string) string {
 
 // Status returns the current System Extension status.
 // This method never returns an error - any errors are reported via status.Error.
+//
+// The m.bundlePath == "" early return below is a bundle-presence
+// precondition, not a liveness statement: an extension orphaned by app
+// deletion persists in /Library/SystemExtensions and would still report
+// Installed=false here because the .app bundle is gone. Surfaces that need
+// the ground truth regardless of the app bundle call CheckSysExtLiveness
+// directly and do not pass through this gate.
+//
+// Installed reflects activation (systemextensionsctl), not readiness: an
+// extension still awaiting user approval in System Settings reports
+// Installed=false. LastExit is suppressed while Running is true, since a
+// historical exit on an otherwise healthy running service is misleading.
 func (m *SysExtManager) Status() (*SysExtStatus, error) {
 	status := &SysExtStatus{
 		BundleID: m.bundleID,
@@ -74,19 +88,18 @@ func (m *SysExtManager) Status() (*SysExtStatus, error) {
 		return status, nil
 	}
 
-	// Check if extension is installed via systemextensionsctl
-	out, err := exec.Command("systemextensionsctl", "list").Output()
-	if err != nil {
-		status.Error = fmt.Sprintf("systemextensionsctl: %v", err)
-		return status, nil
+	liveness := CheckSysExtLiveness()
+	status.Installed = liveness.Activated
+	status.Running = liveness.Running
+	status.ProbeFailed = liveness.ProbeFailed
+	status.State = liveness.State
+	if !liveness.Running {
+		// A historical exit on a healthy running service is misleading in
+		// status output; surface it only when the process is not up.
+		status.LastExit = liveness.LastExit
 	}
-
-	output := string(out)
-	if contains(output, m.bundleID) {
-		status.Installed = true
-		if contains(output, "activated enabled") {
-			status.Running = true
-		}
+	if liveness.ProbeFailed || (liveness.Activated && !liveness.Running) {
+		status.Error = liveness.Detail
 	}
 
 	return status, nil
@@ -121,21 +134,4 @@ func (m *SysExtManager) Activate() (ActivateResult, error) {
 // Uninstall removes the System Extension.
 func (m *SysExtManager) Uninstall() error {
 	return fmt.Errorf("not implemented: requires Swift integration")
-}
-
-// contains checks if substr is present in s.
-// Handles empty strings safely.
-func contains(s, substr string) bool {
-	if len(substr) == 0 {
-		return true
-	}
-	if len(s) < len(substr) {
-		return false
-	}
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }

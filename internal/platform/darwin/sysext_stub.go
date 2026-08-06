@@ -7,8 +7,11 @@ import "fmt"
 
 // SysExtStatus represents the state of the System Extension.
 type SysExtStatus struct {
-	Installed   bool   `json:"installed"`
-	Running     bool   `json:"running"`
+	Installed   bool   `json:"installed"`              // true once systemextensionsctl reports the extension activated; does not imply Running
+	Running     bool   `json:"running"`                // true only on positive proof the launchd service state is "running"
+	ProbeFailed bool   `json:"probe_failed,omitempty"` // a liveness probe command failed or its output was unparseable
+	State       string `json:"state,omitempty"`        // raw launchd state ("running", "spawn scheduled", ...); "" if unknown
+	LastExit    string `json:"last_exit,omitempty"`    // last recorded launchd exit; suppressed while Running is true
 	Version     string `json:"version,omitempty"`
 	BundleID    string `json:"bundle_id,omitempty"`
 	ExtensionID string `json:"extension_id,omitempty"`
