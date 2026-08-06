@@ -191,6 +191,14 @@ is authoritative):
 4. The no-state-line Detail appends `(last exit: …)` when launchctl output
    carried an exit reason despite lacking a parseable state, so an AMFI
    reason still reaches the tips layer on that path.
+5. `SysExtStatus` diverges from this spec in two deliberate ways: `LastExit`
+   is surfaced only when the process is not running (a historical exit on a
+   healthy service misleads status consumers; trade-off: a crash-looping
+   service that is momentarily running shows no exit history), and the
+   struct gained `ProbeFailed bool` (json `probe_failed`) so status
+   consumers can distinguish "couldn't verify" from "cleanly absent" without
+   substring-matching `Error` — matching the `esf_probe_failed` capability
+   and `Permissions.SysExtProbeFailed`.
 
 ## Out of scope / follow-ups
 

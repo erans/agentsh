@@ -874,6 +874,8 @@ git commit -m "fix(#441): enterprise tier requires a running sysext, not merely 
 
 ### Task 7: `SysExtManager.Status()` tells the truth; stub parity
 
+> **Amended during execution** (see the Task 7 commit): `LastExit` is surfaced only when not running (spec amendment #5); `SysExtStatus` gained `ProbeFailed` (both build variants); the mapping test grew `wantState`/`wantProbeFailed` columns plus running-after-crash and systemextensionsctl-failure rows — mutation-verified against the suppression gate, the State passthrough, and the ProbeFailed→Error clause. `NewSysExtManager` uses the `sysExtBundleID` const; `Status()` documents the bundle-presence precondition and Installed-means-activated semantics. The committed code is authoritative over the blocks below.
+
 **Files:**
 - Modify: `internal/platform/darwin/sysext.go`
 - Modify: `internal/platform/darwin/sysext_stub.go`
