@@ -199,6 +199,19 @@ is authoritative):
    consumers can distinguish "couldn't verify" from "cleanly absent" without
    substring-matching `Error` — matching the `esf_probe_failed` capability
    and `Permissions.SysExtProbeFailed`.
+6. The tips ordering in this spec (`OS_REASON_EXEC` → `not running` →
+   `could not be verified`) was swapped in the committed code to
+   `OS_REASON_EXEC` → `could not be verified` → `not running`: probe-failure
+   Details fold third-party stderr that can itself contain the words "not
+   running", so our own fixed prefix must match first (pinned by a test).
+   The tip Action texts were also enriched beyond this spec: the not-running
+   tip leads with Full Disk Access (the most common real cause) and a
+   `/usr/bin/log show --predicate 'process == …'` crash-reason command; the
+   AMFI tip carries a concrete `embedded.provisionprofile` check and
+   upgrade-not-reinstall guidance; all `<TeamID>` placeholders resolve via
+   `systemextensionsctl list`. Additionally, the Command Control esf
+   backend's `check_method` JSON value changed from `"entitlement"` to
+   `"sysext"` to reflect how it is actually checked.
 
 ## Out of scope / follow-ups
 

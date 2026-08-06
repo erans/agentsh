@@ -561,6 +561,8 @@ git commit -m "feat(#441): CheckSysExtLiveness — fail-closed sysext liveness p
 
 ### Task 4: Wire `detect_darwin.go` onto the helper
 
+> **Amended during execution** (see the Task 4 commit): the caps literal was extracted into a pure `darwinCaps(liveness)` function with a mutation-verified table test (guards the exact Running/Activated transposition that would reintroduce #441); caps gained `esf_probe_failed`; the Command Control esf backend's `CheckMethod` was corrected from `"entitlement"` to `"sysext"`; `docs/security-modes.md` gained "and running". The committed code is authoritative over the blocks below.
+
 **Files:**
 - Modify: `internal/capabilities/detect_darwin.go` (delete `checkSysExtInstalled` at lines 110-122; change `Detect()` and `buildDarwinDomains`)
 - Modify: `internal/capabilities/detect_darwin_test.go`
@@ -665,6 +667,8 @@ git commit -m "fix(#441): detect gates esf on sysext liveness, not activation"
 
 ### Task 5: Reason-sensitive esf tips
 
+> **Amended during execution** (see the Task 5 commit and spec amendment #6): entry ordering is `OS_REASON_EXEC` → `could not be verified` → `not running` → fallback (probe-failure Details embed third-party stderr that can contain "not running"; pinned by the `noisy` test). Action texts enriched: Full Disk Access named as the most common not-running cause, `/usr/bin/log show` with a `process ==` predicate (NOT `subsystem ==` — the sysext logs under its bundle ID as process), concrete provisionprofile check + upgrade-not-reinstall guidance on the AMFI tip, resolvable TeamID placeholders, no bare issue references in user-facing text. The committed code is authoritative over the blocks below.
+
 **Files:**
 - Modify: `internal/capabilities/tips.go` (the `"esf"` entry in `tipsByBackend` ~line 178; the esf entry in `darwinTips` ~line 74)
 - Modify: `internal/capabilities/tips_test.go`
@@ -745,6 +749,8 @@ git commit -m "feat(#441): reason-sensitive esf tips (AMFI, not-running, unverif
 ---
 
 ### Task 6: Honest permission tier in `permissions.go`
+
+> **Amended during execution** (see the Task 6 commit): `Permissions` also gained `SysExtProbeFailed`, and `computeMissingPermissions` is a three-way switch (probe failure → "could not be verified" wording embedding the Detail, never install guidance nor a not-running overclaim). The mapping `liveness.Running → HasSystemExtension` is pinned by an injected-runner test (mutation-verified — the transposition IS bug #441). The committed code is authoritative over the blocks below.
 
 **Files:**
 - Modify: `internal/platform/darwin/permissions.go`
