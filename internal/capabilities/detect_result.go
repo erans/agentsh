@@ -123,6 +123,11 @@ func (r *DetectResult) Table() string {
 				if detail == "" {
 					detail = " "
 				}
+				if len(detail) > 16 {
+					sb.WriteString(fmt.Sprintf("  %-20s %s  %s\n", b.Name, status, b.Description))
+					sb.WriteString(fmt.Sprintf("  %-20s    %s\n", "", detail))
+					continue
+				}
 				sb.WriteString(fmt.Sprintf("  %-20s %s  %-16s %s\n", b.Name, status, detail, b.Description))
 			}
 			if d.Active != "" && d.Active != "none" {

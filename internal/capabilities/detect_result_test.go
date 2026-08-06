@@ -218,6 +218,76 @@ func TestTableFormat_FallbackFlat(t *testing.T) {
 	assert.Contains(t, table, "sandbox_exec")
 }
 
+func TestTable_LongDetailContinuationLine(t *testing.T) {
+	const longDetail = "activated but not running (state: spawn scheduled, last exit: exit code 1)"
+	result := &DetectResult{
+		Platform:        "darwin",
+		SecurityMode:    "esf",
+		ProtectionScore: 70,
+		Domains: []ProtectionDomain{
+			{Name: "Command Control", Weight: 25, Score: 25, Backends: []DetectedBackend{
+				{Name: "esf-exec", Available: true, Detail: "ok", Description: "exec auth"},
+				{Name: "esf-liveness", Available: false, Detail: longDetail, Description: "liveness monitor"},
+			}, Active: "esf-exec"},
+		},
+		Capabilities: map[string]any{"esf": true},
+	}
+
+	table := result.Table()
+	lines := strings.Split(table, "\n")
+
+	// The long detail must appear on a line that does NOT also contain the
+	// Description, i.e. it's rendered on its own continuation line.
+	var longDetailLine string
+	for _, line := range lines {
+		if strings.Contains(line, longDetail) {
+			longDetailLine = line
+			break
+		}
+	}
+	if longDetailLine == "" {
+		t.Fatalf("Table() output does not contain long detail %q:\n%s", longDetail, table)
+	}
+	if strings.Contains(longDetailLine, "liveness monitor") {
+		t.Errorf("long detail line should not also contain Description, got: %q", longDetailLine)
+	}
+
+	// The backend row for the long-detail backend must still contain its
+	// Name, status marker, and Description (just not the detail).
+	var backendRowLine string
+	for _, line := range lines {
+		if strings.Contains(line, "esf-liveness") {
+			backendRowLine = line
+			break
+		}
+	}
+	if backendRowLine == "" {
+		t.Fatalf("Table() output does not contain backend row for esf-liveness:\n%s", table)
+	}
+	if !strings.Contains(backendRowLine, "-") {
+		t.Errorf("backend row should contain unavailable status marker, got: %q", backendRowLine)
+	}
+	if !strings.Contains(backendRowLine, "liveness monitor") {
+		t.Errorf("backend row should contain Description, got: %q", backendRowLine)
+	}
+
+	// The short-detail backend renders inline on one line containing name,
+	// detail, and description.
+	var shortDetailLine string
+	for _, line := range lines {
+		if strings.Contains(line, "esf-exec") {
+			shortDetailLine = line
+			break
+		}
+	}
+	if shortDetailLine == "" {
+		t.Fatalf("Table() output does not contain backend row for esf-exec:\n%s", table)
+	}
+	if !strings.Contains(shortDetailLine, "ok") || !strings.Contains(shortDetailLine, "exec auth") {
+		t.Errorf("short-detail backend row should contain name, detail, and description inline, got: %q", shortDetailLine)
+	}
+}
+
 func TestDetectResult_JSONContainsDomains(t *testing.T) {
 	result := &DetectResult{
 		Platform:        "linux",
