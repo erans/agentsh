@@ -2,7 +2,11 @@
 
 package darwin
 
-import "testing"
+import (
+	"errors"
+	"strings"
+	"testing"
+)
 
 // Real output captured 2026-08-05 from a machine where the agentsh sysext is
 // activated but AMFI/launchd keeps it from running (the #441 specimen). Note
@@ -163,6 +167,154 @@ func TestParseLaunchdState(t *testing.T) {
 			}
 			if lastExit != tt.wantLastExit {
 				t.Errorf("lastExit = %q, want %q", lastExit, tt.wantLastExit)
+			}
+		})
+	}
+}
+
+func TestCheckSysExtLiveness_DecisionTable(t *testing.T) {
+	tests := []struct {
+		name            string
+		sysextOut       string
+		sysextErr       error
+		launchctlOut    string
+		launchctlErr    error
+		wantActivated   bool
+		wantRunning     bool
+		wantProbeFailed bool
+		wantState       string
+		wantLastExit    string
+		wantDetailSub   string // Detail must contain this substring
+	}{
+		{
+			name:          "not activated",
+			sysextOut:     sysextListBeaconOnly,
+			wantDetailSub: "not activated",
+		},
+		{
+			name:            "systemextensionsctl fails -> not activated, probe failed",
+			sysextErr:       errors.New("exec: not found"),
+			wantProbeFailed: true,
+			wantDetailSub:   "not activated",
+		},
+		{
+			name:          "activated and running",
+			sysextOut:     sysextListBoth,
+			launchctlOut:  launchdRunning,
+			wantActivated: true,
+			wantRunning:   true,
+			wantState:     "running",
+			wantLastExit:  "",
+			wantDetailSub: "running",
+		},
+		{
+			name:          "activated, spawn scheduled -> not running with diagnostics",
+			sysextOut:     sysextListBoth,
+			launchctlOut:  launchdSpawnScheduled,
+			wantActivated: true,
+			wantRunning:   false,
+			wantState:     "spawn scheduled",
+			wantLastExit:  "exit code 1",
+			wantDetailSub: "activated but not running (state: spawn scheduled, last exit: exit code 1)",
+		},
+		{
+			name:          "activated, AMFI blocked -> Detail carries OS_REASON_EXEC",
+			sysextOut:     sysextListBoth,
+			launchctlOut:  launchdAMFIBlocked,
+			wantActivated: true,
+			wantRunning:   false,
+			wantState:     "spawn scheduled",
+			wantLastExit:  `OS_REASON_EXEC | Error -413 "No matching profile found"`,
+			wantDetailSub: "OS_REASON_EXEC",
+		},
+		{
+			name:            "activated, launchctl fails -> fail closed",
+			sysextOut:       sysextListBoth,
+			launchctlErr:    errors.New("Could not find service"),
+			wantActivated:   true,
+			wantRunning:     false,
+			wantProbeFailed: true,
+			wantDetailSub:   "could not be verified",
+		},
+		{
+			name:            "activated, no state line -> fail closed",
+			sysextOut:       sysextListBoth,
+			launchctlOut:    "system/x = {\n\truns = 3\n}\n",
+			wantActivated:   true,
+			wantRunning:     false,
+			wantProbeFailed: true,
+			wantState:       "",
+			wantLastExit:    "",
+			wantDetailSub:   "could not be verified",
+		},
+		{
+			name:          "launchd state 'not running' must not satisfy the gate",
+			sysextOut:     sysextListBoth,
+			launchctlOut:  "system/x = {\n\tstate = not running\n\tlast exit code = 1\n}\n",
+			wantActivated: true,
+			wantRunning:   false,
+			wantState:     "not running",
+			wantLastExit:  "exit code 1",
+			wantDetailSub: "activated but not running (state: not running, last exit: exit code 1)",
+		},
+		{
+			name:            "activated but blank team ID -> fail closed, launchctl skipped",
+			sysextOut:       sysextListBlankTeamID,
+			launchctlOut:    launchdRunning, // must be ignored; if reached, Running would flip true
+			wantActivated:   true,
+			wantRunning:     false,
+			wantProbeFailed: true,
+			wantDetailSub:   "could not be verified",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			restore := runLivenessCommand
+			defer func() { runLivenessCommand = restore }()
+			var launchctlLabel string
+			runLivenessCommand = func(name string, args ...string) (string, error) {
+				if name == "systemextensionsctl" {
+					return tt.sysextOut, tt.sysextErr
+				}
+				if name == "launchctl" && len(args) == 2 && args[0] == "print" {
+					launchctlLabel = args[1]
+				}
+				return tt.launchctlOut, tt.launchctlErr
+			}
+
+			got := CheckSysExtLiveness()
+			if got.Activated != tt.wantActivated {
+				t.Errorf("Activated = %v, want %v", got.Activated, tt.wantActivated)
+			}
+			if got.Running != tt.wantRunning {
+				t.Errorf("Running = %v, want %v", got.Running, tt.wantRunning)
+			}
+			if got.ProbeFailed != tt.wantProbeFailed {
+				t.Errorf("ProbeFailed = %v, want %v", got.ProbeFailed, tt.wantProbeFailed)
+			}
+			if got.State != tt.wantState {
+				t.Errorf("State = %q, want %q", got.State, tt.wantState)
+			}
+			if got.LastExit != tt.wantLastExit {
+				t.Errorf("LastExit = %q, want %q", got.LastExit, tt.wantLastExit)
+			}
+			if !strings.Contains(got.Detail, tt.wantDetailSub) {
+				t.Errorf("Detail = %q, want substring %q", got.Detail, tt.wantDetailSub)
+			}
+			if strings.ContainsAny(got.Detail, "\n\r") {
+				t.Errorf("Detail must be a single line for the table renderer, got %q", got.Detail)
+			}
+			if got.Detail == "" {
+				t.Errorf("Detail must never be empty")
+			}
+			if tt.wantRunning && got.Detail != "running" {
+				t.Errorf("healthy Detail = %q, want exactly \"running\"", got.Detail)
+			}
+			if tt.wantActivated && tt.launchctlErr == nil && tt.launchctlOut != "" && launchctlLabel != "" {
+				want := "system/WCKWMMKJ35." + sysExtBundleID
+				if launchctlLabel != want {
+					t.Errorf("launchctl label = %q, want %q", launchctlLabel, want)
+				}
 			}
 		})
 	}

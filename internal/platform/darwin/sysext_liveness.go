@@ -40,10 +40,14 @@ var runLivenessCommand = func(name string, args ...string) (string, error) {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, name, args...).Output()
 	if err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			if msg := strings.Join(strings.Fields(string(exitErr.Stderr)), " "); msg != "" {
-				err = fmt.Errorf("%w: %s", err, msg)
+		if ctx.Err() != nil {
+			err = fmt.Errorf("timed out after %v", livenessCmdTimeout)
+		} else {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				if msg := strings.Join(strings.Fields(string(exitErr.Stderr)), " "); msg != "" {
+					err = fmt.Errorf("%w: %s", err, msg)
+				}
 			}
 		}
 	}
@@ -115,4 +119,61 @@ func parseLaunchdState(output string) (state, lastExit string) {
 		lastExit = "exit code " + exitCode
 	}
 	return state, lastExit
+}
+
+// CheckSysExtLiveness probes whether the agentsh system extension is
+// activated AND its process is actually running. Decision table (fail
+// closed — Running requires positive proof of state = running):
+//
+//	systemextensionsctl        launchctl                      -> result
+//	not activated / cmd fails  (skipped)                      Activated=false, Running=false
+//	activated                  state = running                Running=true
+//	activated                  any other state                Running=false, Detail has state + last exit
+//	activated                  cmd fails / no state / no team  Running=false, Detail "could not be verified"
+func CheckSysExtLiveness() SysExtLiveness {
+	out, err := runLivenessCommand("systemextensionsctl", "list")
+	if err != nil {
+		return SysExtLiveness{ProbeFailed: true, Detail: "not activated (liveness could not be verified: systemextensionsctl failed: " + err.Error() + ")"}
+	}
+	activated, teamID := parseSysExtList(out)
+	if !activated {
+		return SysExtLiveness{Detail: "not activated"}
+	}
+
+	liveness := SysExtLiveness{Activated: true}
+	if teamID == "" {
+		liveness.ProbeFailed = true
+		liveness.Detail = "activated but liveness could not be verified (no team ID in systemextensionsctl output)"
+		return liveness
+	}
+
+	label := "system/" + teamID + "." + sysExtBundleID
+	lout, err := runLivenessCommand("launchctl", "print", label)
+	if err != nil {
+		liveness.ProbeFailed = true
+		liveness.Detail = "activated but liveness could not be verified (launchctl print " + label + " failed: " + err.Error() + ")"
+		return liveness
+	}
+
+	state, lastExit := parseLaunchdState(lout)
+	liveness.State = state
+	liveness.LastExit = lastExit
+	switch state {
+	case "running":
+		liveness.Running = true
+		liveness.Detail = "running"
+	case "":
+		liveness.ProbeFailed = true
+		liveness.Detail = "activated but liveness could not be verified (no state in launchctl output)"
+		if lastExit != "" {
+			liveness.Detail += " (last exit: " + lastExit + ")"
+		}
+	default:
+		detail := "activated but not running (state: " + state
+		if lastExit != "" {
+			detail += ", last exit: " + lastExit
+		}
+		liveness.Detail = detail + ")"
+	}
+	return liveness
 }
