@@ -82,3 +82,37 @@ func parseSysExtList(output string) (activated bool, teamID string) {
 	}
 	return activated, teamID
 }
+
+// parseLaunchdState extracts the service-level state and last-exit info from
+// `launchctl print system/<label>` output. Only the FIRST "state =" line is
+// the service state: nested sub-sections (event triggers, XPC endpoints)
+// contain their own "state = active" lines. "last exit reason" (present on
+// exec-level failures like AMFI rejection, per #436) is preferred over
+// "last exit code"; a code of "(never exited)" or "0" is not an exit signal.
+// The reported last exit is the most recent exit launchd ever recorded for
+// the service and may predate the current state.
+func parseLaunchdState(output string) (state, lastExit string) {
+	var exitCode, exitReason string
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if state == "" {
+			if v, ok := strings.CutPrefix(trimmed, "state = "); ok {
+				state = strings.TrimSpace(v)
+				continue
+			}
+		}
+		if v, ok := strings.CutPrefix(trimmed, "last exit reason = "); ok && exitReason == "" {
+			exitReason = strings.TrimSpace(v)
+		}
+		if v, ok := strings.CutPrefix(trimmed, "last exit code = "); ok && exitCode == "" {
+			exitCode = strings.TrimSpace(v)
+		}
+	}
+	switch {
+	case exitReason != "":
+		lastExit = exitReason
+	case exitCode != "" && exitCode != "0" && exitCode != "(never exited)":
+		lastExit = "exit code " + exitCode
+	}
+	return state, lastExit
+}
