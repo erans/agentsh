@@ -16,7 +16,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 )
 
-// ConnectEvent matches the struct emitted by the BPF program.
+// ConnectEvent is the decoded representation of connect_event from connect.bpf.c.
 type ConnectEvent struct {
 	TsNs     uint64
 	Cookie   uint64
@@ -32,6 +32,14 @@ type ConnectEvent struct {
 	Blocked  uint8
 	_pad     [7]byte
 }
+
+const (
+	connectEventBaseLen       = 30
+	connectEventDstOffset     = 36
+	connectEventDstEndOffset  = connectEventDstOffset + 16
+	connectEventBlockedOffset = connectEventDstEndOffset
+	connectEventMinLen        = connectEventBlockedOffset + 1
+)
 
 // Collector reads events from the BPF ring buffer.
 type Collector struct {
@@ -91,7 +99,7 @@ func (c *Collector) loop() {
 			continue
 		}
 		var ev ConnectEvent
-		if len(record.RawSample) >= 49 { // 49 bytes needed for blocked flag
+		if len(record.RawSample) >= connectEventMinLen {
 			copyToEvent(&ev, record.RawSample)
 
 			// Evaluate connect redirect if configured
@@ -111,7 +119,7 @@ func (c *Collector) loop() {
 func copyToEvent(ev *ConnectEvent, data []byte) {
 	// Layout matches struct in connect.bpf.c
 	// Minimum 30 bytes required for base fields (up to Protocol at offset 29)
-	if len(data) < 30 {
+	if len(data) < connectEventBaseLen {
 		return
 	}
 	ev.TsNs = le64(data[0:])
@@ -122,14 +130,14 @@ func copyToEvent(ev *ConnectEvent, data []byte) {
 	ev.Dport = le16(data[26:])
 	ev.Family = data[28]
 	ev.Protocol = data[29]
-	if len(data) >= 48 {
-		copy(ev.DstIPv6[:], data[32:48]) // always copy 16 bytes
-		if len(data) >= 40 {
-			ev.DstIPv4 = le32(data[36:]) // overlap ok for v4
-		}
+	if len(data) >= connectEventDstOffset+4 {
+		ev.DstIPv4 = le32(data[connectEventDstOffset:])
 	}
-	if len(data) > 48 {
-		ev.Blocked = data[48]
+	if len(data) >= connectEventDstEndOffset {
+		copy(ev.DstIPv6[:], data[connectEventDstOffset:connectEventDstEndOffset])
+	}
+	if len(data) > connectEventBlockedOffset {
+		ev.Blocked = data[connectEventBlockedOffset]
 	}
 }
 

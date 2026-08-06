@@ -18,10 +18,67 @@ func TestCopyToEventBounds(t *testing.T) {
 	copyToEvent(&ev, data)
 }
 
+func TestCopyToEventDecodesBlockedFlagFromConnectEventLayout(t *testing.T) {
+	var ev ConnectEvent
+	data := make([]byte, 60)
+	data[48] = 0
+	data[connectEventBlockedOffset] = 1
+
+	copyToEvent(&ev, data)
+
+	if ev.Blocked != 1 {
+		t.Fatalf("Blocked = %d, want 1", ev.Blocked)
+	}
+}
+
+func TestCopyToEventDecodesIPv4DestinationFromConnectEventLayout(t *testing.T) {
+	var ev ConnectEvent
+	data := make([]byte, 60)
+	data[connectEventDstOffset+0] = 127
+	data[connectEventDstOffset+1] = 0
+	data[connectEventDstOffset+2] = 0
+	data[connectEventDstOffset+3] = 1
+
+	copyToEvent(&ev, data)
+
+	if got, want := ev.DstIPv4, uint32(0x0100007f); got != want {
+		t.Fatalf("DstIPv4 = %#x, want %#x", got, want)
+	}
+}
+
+func TestCopyToEventDecodesIPv6DestinationFromConnectEventLayout(t *testing.T) {
+	var ev ConnectEvent
+	data := make([]byte, 60)
+	want := net.ParseIP("2001:db8::1").To16()
+	if want == nil {
+		t.Fatal("failed to parse test IPv6 address")
+	}
+	copy(data[connectEventDstOffset:connectEventDstEndOffset], want)
+
+	copyToEvent(&ev, data)
+
+	got := net.IP(ev.DstIPv6[:])
+	if !got.Equal(want) {
+		t.Fatalf("DstIPv6 = %v, want %v", got, want)
+	}
+}
+
+func TestCopyToEventIgnoresOldBlockedOffset(t *testing.T) {
+	var ev ConnectEvent
+	data := make([]byte, connectEventBlockedOffset)
+	data[48] = 1
+
+	copyToEvent(&ev, data)
+
+	if ev.Blocked != 0 {
+		t.Fatalf("Blocked = %d, want 0", ev.Blocked)
+	}
+}
+
 func TestExtractDstIP_IPv4(t *testing.T) {
 	c := &Collector{}
 	ev := &ConnectEvent{
-		Family:  2, // AF_INET
+		Family:  2,          // AF_INET
 		DstIPv4: 0x0100007f, // 127.0.0.1 in little-endian
 	}
 
