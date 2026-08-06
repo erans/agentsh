@@ -174,17 +174,18 @@ func TestParseLaunchdState(t *testing.T) {
 
 func TestCheckSysExtLiveness_DecisionTable(t *testing.T) {
 	tests := []struct {
-		name            string
-		sysextOut       string
-		sysextErr       error
-		launchctlOut    string
-		launchctlErr    error
-		wantActivated   bool
-		wantRunning     bool
-		wantProbeFailed bool
-		wantState       string
-		wantLastExit    string
-		wantDetailSub   string // Detail must contain this substring
+		name                 string
+		sysextOut            string
+		sysextErr            error
+		launchctlOut         string
+		launchctlErr         error
+		wantActivated        bool
+		wantRunning          bool
+		wantProbeFailed      bool
+		wantState            string
+		wantLastExit         string
+		wantDetailSub        string // Detail must contain this substring
+		wantLaunchctlSkipped bool
 	}{
 		{
 			name:          "not activated",
@@ -195,7 +196,7 @@ func TestCheckSysExtLiveness_DecisionTable(t *testing.T) {
 			name:            "systemextensionsctl fails -> not activated, probe failed",
 			sysextErr:       errors.New("exec: not found"),
 			wantProbeFailed: true,
-			wantDetailSub:   "not activated",
+			wantDetailSub:   "not activated (liveness could not be verified",
 		},
 		{
 			name:          "activated and running",
@@ -258,13 +259,24 @@ func TestCheckSysExtLiveness_DecisionTable(t *testing.T) {
 			wantDetailSub: "activated but not running (state: not running, last exit: exit code 1)",
 		},
 		{
-			name:            "activated but blank team ID -> fail closed, launchctl skipped",
-			sysextOut:       sysextListBlankTeamID,
-			launchctlOut:    launchdRunning, // must be ignored; if reached, Running would flip true
+			name:                 "activated but blank team ID -> fail closed, launchctl skipped",
+			sysextOut:            sysextListBlankTeamID,
+			launchctlOut:         launchdRunning, // must be ignored; if reached, Running would flip true
+			wantActivated:        true,
+			wantRunning:          false,
+			wantProbeFailed:      true,
+			wantDetailSub:        "could not be verified",
+			wantLaunchctlSkipped: true,
+		},
+		{
+			name:            "no state but AMFI reason still surfaces",
+			sysextOut:       sysextListBoth,
+			launchctlOut:    "system/x = {\n\tlast exit reason = OS_REASON_EXEC | Error -413\n}\n",
 			wantActivated:   true,
 			wantRunning:     false,
 			wantProbeFailed: true,
-			wantDetailSub:   "could not be verified",
+			wantLastExit:    "OS_REASON_EXEC | Error -413",
+			wantDetailSub:   "could not be verified (no state in launchctl output) (last exit: OS_REASON_EXEC | Error -413)",
 		},
 	}
 	for _, tt := range tests {
@@ -276,8 +288,8 @@ func TestCheckSysExtLiveness_DecisionTable(t *testing.T) {
 				if name == "systemextensionsctl" {
 					return tt.sysextOut, tt.sysextErr
 				}
-				if name == "launchctl" && len(args) == 2 && args[0] == "print" {
-					launchctlLabel = args[1]
+				if name == "launchctl" {
+					launchctlLabel = strings.Join(args, " ")
 				}
 				return tt.launchctlOut, tt.launchctlErr
 			}
@@ -310,11 +322,12 @@ func TestCheckSysExtLiveness_DecisionTable(t *testing.T) {
 			if tt.wantRunning && got.Detail != "running" {
 				t.Errorf("healthy Detail = %q, want exactly \"running\"", got.Detail)
 			}
-			if tt.wantActivated && tt.launchctlErr == nil && tt.launchctlOut != "" && launchctlLabel != "" {
-				want := "system/WCKWMMKJ35." + sysExtBundleID
-				if launchctlLabel != want {
-					t.Errorf("launchctl label = %q, want %q", launchctlLabel, want)
-				}
+			wantCall := ""
+			if tt.wantActivated && !tt.wantLaunchctlSkipped {
+				wantCall = "print system/WCKWMMKJ35." + sysExtBundleID
+			}
+			if launchctlLabel != wantCall {
+				t.Errorf("launchctl invocation = %q, want %q", launchctlLabel, wantCall)
 			}
 		})
 	}
