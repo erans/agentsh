@@ -4,10 +4,11 @@ package capabilities
 
 import (
 	"os/exec"
-	"strings"
+
+	"github.com/agentsh/agentsh/internal/platform/darwin"
 )
 
-func buildDarwinDomains(caps map[string]any) []ProtectionDomain {
+func buildDarwinDomains(caps map[string]any, esfDetail string) []ProtectionDomain {
 	esf, _ := caps["esf"].(bool)
 	networkExt, _ := caps["network_extension"].(bool)
 	hasMacwrap := checkMacwrap()
@@ -21,13 +22,13 @@ func buildDarwinDomains(caps map[string]any) []ProtectionDomain {
 		{
 			Name: "File Protection", Weight: WeightFileProtection,
 			Backends: []DetectedBackend{
-				{Name: "esf", Available: esf, Detail: "", Description: "Endpoint Security Framework", CheckMethod: "sysext"},
+				{Name: "esf", Available: esf, Detail: esfDetail, Description: "Endpoint Security Framework", CheckMethod: "sysext"},
 			},
 		},
 		{
 			Name: "Command Control", Weight: WeightCommandControl,
 			Backends: []DetectedBackend{
-				{Name: "esf", Available: esf, Detail: "", Description: "process execution control", CheckMethod: "entitlement"},
+				{Name: "esf", Available: esf, Detail: esfDetail, Description: "process execution control", CheckMethod: "sysext"},
 				{Name: "dynamic-seatbelt", Available: hasMacwrap, Detail: macwrapDetail, Description: "policy-driven exec restriction", CheckMethod: "binary"},
 				{Name: "sandbox-exec", Available: true, Detail: "", Description: "macOS sandbox", CheckMethod: "builtin"},
 			},
@@ -70,17 +71,27 @@ func buildDarwinDomains(caps map[string]any) []ProtectionDomain {
 	}
 }
 
-// Detect runs platform-specific detection and returns unified result.
-func Detect() (*DetectResult, error) {
-	caps := map[string]any{
+// darwinCaps maps sysext liveness onto the capability map. Kept pure so the
+// esf/esf_activated mapping — the exact regression #441 fixed — is testable
+// without subprocesses.
+func darwinCaps(l darwin.SysExtLiveness) map[string]any {
+	return map[string]any{
 		"sandbox_exec":      true,
-		"esf":               checkSysExtInstalled(),
+		"esf":               l.Running,
+		"esf_activated":     l.Activated,
+		"esf_probe_failed":  l.ProbeFailed,
 		"network_extension": checkNetworkExtension(),
 		"lima_available":    checkLima(),
 	}
+}
+
+// Detect runs platform-specific detection and returns unified result.
+func Detect() (*DetectResult, error) {
+	liveness := darwin.CheckSysExtLiveness()
+	caps := darwinCaps(liveness)
 
 	mode, _ := selectDarwinMode(caps)
-	domains := buildDarwinDomains(caps)
+	domains := buildDarwinDomains(caps, liveness.Detail)
 	score := ComputeScore(domains)
 
 	var available, unavailable []string
@@ -105,20 +116,6 @@ func Detect() (*DetectResult, error) {
 		Summary:         DetectSummary{Available: available, Unavailable: unavailable},
 		Tips:            tips,
 	}, nil
-}
-
-// checkSysExtInstalled checks if the agentsh system extension is activated.
-// Delegates to the darwin package's exported function.
-func checkSysExtInstalled() bool {
-	// Call the shared detection function from the darwin package
-	cmd := exec.Command("systemextensionsctl", "list")
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	outputStr := string(output)
-	return strings.Contains(outputStr, "ai.canyonroad.agentsh.SysExt") &&
-		strings.Contains(outputStr, "activated enabled")
 }
 
 func checkNetworkExtension() bool {

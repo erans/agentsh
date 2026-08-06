@@ -26,7 +26,7 @@ Security enforcement is provided through a combination of:
 
 | Mode | Requirements | Protection Level | Description |
 |------|--------------|------------------|-------------|
-| `esf` | System extension approved | ~90% | Endpoint Security Framework (Alpha) |
+| `esf` | System extension approved and running | ~90% | Endpoint Security Framework (Alpha) |
 | `lima` | limactl available | ~85% | Full Linux enforcement inside Lima VM |
 | `observation` | None | ~25% | Observation-only, no enforcement |
 
