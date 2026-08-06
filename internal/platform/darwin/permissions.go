@@ -52,7 +52,13 @@ func (t PermissionTier) SecurityScore() int {
 
 // Permissions holds detected macOS permission state.
 type Permissions struct {
-	HasSystemExtension bool
+	HasSystemExtension bool // extension activated AND its process is running
+
+	// SysExtActivated distinguishes "activated but not running" (AMFI-blocked,
+	// crash-looping — see #441) from "not installed at all".
+	SysExtActivated   bool
+	SysExtDetail      string
+	SysExtProbeFailed bool
 
 	// Basic Permissions
 	HasRootAccess     bool
@@ -86,7 +92,11 @@ func DetectPermissions() *Permissions {
 	}
 
 	// Check system extension
-	p.HasSystemExtension = CheckSysExtInstalled()
+	liveness := CheckSysExtLiveness()
+	p.HasSystemExtension = liveness.Running
+	p.SysExtActivated = liveness.Activated
+	p.SysExtDetail = liveness.Detail
+	p.SysExtProbeFailed = liveness.ProbeFailed
 
 	// Check basic permissions
 	p.HasRootAccess = os.Geteuid() == 0
@@ -99,17 +109,6 @@ func DetectPermissions() *Permissions {
 	p.computeMissingPermissions()
 
 	return p
-}
-
-// CheckSysExtInstalled checks if the agentsh system extension is installed and activated.
-func CheckSysExtInstalled() bool {
-	cmd := exec.Command("systemextensionsctl", "list")
-	output, err := cmd.Output()
-	if err != nil {
-		return false
-	}
-	return strings.Contains(string(output), "ai.canyonroad.agentsh.SysExt") &&
-		strings.Contains(string(output), "activated enabled")
 }
 
 // checkFullDiskAccess tests if we can access protected directories.
@@ -152,14 +151,25 @@ func (p *Permissions) computeMissingPermissions() {
 	p.MissingPermissions = []MissingPermission{}
 
 	if !p.HasSystemExtension {
-		p.MissingPermissions = append(p.MissingPermissions, MissingPermission{
+		mp := MissingPermission{
 			Name:        "System Extension",
 			Description: "ESF-based file/process monitoring and Network Extension filtering",
 			Impact:      "Cannot intercept or block file operations. File monitoring unavailable.",
 			HowToEnable: "Install the agentsh macOS app bundle which includes the system extension.\n" +
 				"After installation, approve it in System Settings > Privacy & Security.",
 			Required: false,
-		})
+		}
+		switch {
+		case p.SysExtProbeFailed:
+			mp.Impact = "System extension liveness could not be verified. ESF enforcement cannot be confirmed."
+			mp.HowToEnable = "Diagnose with: launchctl print system/<TeamID>.ai.canyonroad.agentsh.SysExt (TeamID: systemextensionsctl list)\n" +
+				"Detected: " + p.SysExtDetail
+		case p.SysExtActivated:
+			mp.Impact = "System extension is activated but its process is not running. ESF enforcement is absent."
+			mp.HowToEnable = "Diagnose with: launchctl print system/<TeamID>.ai.canyonroad.agentsh.SysExt (TeamID: systemextensionsctl list)\n" +
+				"Detected: " + p.SysExtDetail
+		}
+		p.MissingPermissions = append(p.MissingPermissions, mp)
 	}
 
 	if !p.HasRootAccess {

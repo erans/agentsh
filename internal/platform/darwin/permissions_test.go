@@ -202,3 +202,102 @@ func TestPermissions_LogStatus(t *testing.T) {
 		t.Error("LogStatus() missing System Extension section")
 	}
 }
+
+func TestComputeTier_RequiresRunningSysExt(t *testing.T) {
+	p := &Permissions{HasSystemExtension: true}
+	p.computeTier()
+	if p.Tier != TierEnterprise {
+		t.Errorf("Tier = %v, want TierEnterprise when sysext running", p.Tier)
+	}
+
+	// Activated but not running must NOT reach enterprise tier.
+	p = &Permissions{SysExtActivated: true, HasSystemExtension: false}
+	p.computeTier()
+	if p.Tier == TierEnterprise {
+		t.Error("Tier = TierEnterprise for activated-but-not-running sysext; want lower tier")
+	}
+}
+
+func TestComputeMissingPermissions_SysExtBranches(t *testing.T) {
+	// Not installed: install guidance.
+	p := &Permissions{}
+	p.computeMissingPermissions()
+	mp := findMissing(t, p, "System Extension")
+	if !strings.Contains(mp.HowToEnable, "Install the agentsh macOS app bundle") {
+		t.Errorf("HowToEnable = %q, want install guidance", mp.HowToEnable)
+	}
+
+	// Activated but not running: launchctl diagnostics, not install guidance.
+	p = &Permissions{
+		SysExtActivated: true,
+		SysExtDetail:    "activated but not running (state: spawn scheduled, last exit: exit code 1)",
+	}
+	p.computeMissingPermissions()
+	mp = findMissing(t, p, "System Extension")
+	if !strings.Contains(mp.HowToEnable, "launchctl print") {
+		t.Errorf("HowToEnable = %q, want launchctl diagnostics", mp.HowToEnable)
+	}
+	if !strings.Contains(mp.HowToEnable, p.SysExtDetail) {
+		t.Errorf("HowToEnable = %q, want embedded liveness detail", mp.HowToEnable)
+	}
+}
+
+func findMissing(t *testing.T, p *Permissions, name string) MissingPermission {
+	t.Helper()
+	for _, mp := range p.MissingPermissions {
+		if mp.Name == name {
+			return mp
+		}
+	}
+	t.Fatalf("MissingPermissions has no entry %q", name)
+	return MissingPermission{}
+}
+
+func TestDetectPermissions_SysExtLivenessMapping(t *testing.T) {
+	restore := runLivenessCommand
+	defer func() { runLivenessCommand = restore }()
+
+	cases := []struct {
+		name          string
+		launchctlOut  string
+		wantHasSysExt bool
+	}{
+		{"activated but spawn scheduled must not count", launchdSpawnScheduled, false},
+		{"activated and running counts", launchdRunning, true},
+	}
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			runLivenessCommand = func(name string, args ...string) (string, error) {
+				if name == "systemextensionsctl" {
+					return sysextListBoth, nil
+				}
+				return tt.launchctlOut, nil
+			}
+			p := DetectPermissions()
+			if p.HasSystemExtension != tt.wantHasSysExt {
+				t.Errorf("HasSystemExtension = %v, want %v (the #441 mapping)", p.HasSystemExtension, tt.wantHasSysExt)
+			}
+			if !p.SysExtActivated {
+				t.Error("SysExtActivated = false, want true")
+			}
+		})
+	}
+}
+
+func TestComputeMissingPermissions_ProbeFailedBranch(t *testing.T) {
+	p := &Permissions{
+		SysExtProbeFailed: true,
+		SysExtDetail:      "activated but liveness could not be verified (no state in launchctl output)",
+	}
+	p.computeMissingPermissions()
+	mp := findMissing(t, p, "System Extension")
+	if !strings.Contains(mp.Impact, "could not be verified") {
+		t.Errorf("Impact = %q, want unverifiable wording, not a not-running claim", mp.Impact)
+	}
+	if !strings.Contains(mp.HowToEnable, p.SysExtDetail) {
+		t.Errorf("HowToEnable = %q, want embedded detail", mp.HowToEnable)
+	}
+	if strings.Contains(mp.HowToEnable, "Install the agentsh macOS app bundle") {
+		t.Errorf("HowToEnable = %q, must not show install guidance on probe failure", mp.HowToEnable)
+	}
+}
