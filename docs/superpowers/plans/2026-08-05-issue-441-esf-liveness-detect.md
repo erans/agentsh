@@ -25,6 +25,8 @@
 
 ### Task 1: `parseSysExtList` — per-line activation + team-ID parsing
 
+> **Amended during execution** (see the Task 1 commit): code review hardened `parseSysExtList` — activation now requires an exact bundle-ID field token (immune to prefix-sibling bundles like `...SysExtBeta`), scanning continues past rows that yield no team ID, and `"*"` is rejected as a team ID (blank-column marker). `runLivenessCommand` additionally folds captured stderr — whitespace-collapsed to one line — into returned errors so probe diagnostics carry the tool's actual message. Three regression subtests were added. The committed code is authoritative over the blocks below.
+
 **Files:**
 - Create: `internal/platform/darwin/sysext_liveness.go`
 - Create: `internal/platform/darwin/sysext_liveness_test.go`
