@@ -280,3 +280,49 @@ func TestLookupTip_NonEBPFUnchanged(t *testing.T) {
 	assert.Equal(t, "fuse", tip.Feature)
 	assert.Contains(t, tip.Action, "FUSE3")
 }
+
+func TestLookupTip_ESFReasonSensitive(t *testing.T) {
+	// AMFI rejection: OS_REASON_EXEC must win even though the detail also
+	// contains "not running" (first-match-wins ordering).
+	amfi := lookupTip("esf", `activated but not running (state: spawn scheduled, last exit: OS_REASON_EXEC | Error -413 "No matching profile found")`)
+	assert.NotNil(t, amfi)
+	assert.Contains(t, amfi.Action, "embedded.provisionprofile")
+
+	// AMFI reason surviving a missing state line must still route to the
+	// AMFI tip (detail contains both OS_REASON_EXEC and "could not be
+	// verified"; ordering decides).
+	amfiNoState := lookupTip("esf", "activated but liveness could not be verified (no state in launchctl output) (last exit: OS_REASON_EXEC | Error -413)")
+	assert.NotNil(t, amfiNoState)
+	assert.Contains(t, amfiNoState.Action, "embedded.provisionprofile")
+
+	// Generic not-running: points at launchctl diagnostics.
+	stuck := lookupTip("esf", "activated but not running (state: spawn scheduled, last exit: exit code 1)")
+	assert.NotNil(t, stuck)
+	assert.Contains(t, stuck.Action, "launchctl print")
+	assert.Contains(t, stuck.Action, `/usr/bin/log show --predicate 'process ==`)
+	assert.Contains(t, stuck.Action, "Full Disk Access")
+	assert.NotContains(t, stuck.Action, "embedded.provisionprofile")
+
+	// Probe failure while activated: liveness unverifiable.
+	unverified := lookupTip("esf", "activated but liveness could not be verified (no state in launchctl output)")
+	assert.NotNil(t, unverified)
+	assert.Contains(t, unverified.Action, "launchctl print")
+
+	// Probe failure before activation could be determined: also routes to
+	// the unverifiable tip, NOT the install tip.
+	sysextctlDown := lookupTip("esf", "not activated (liveness could not be verified: systemextensionsctl failed: exit status 1)")
+	assert.NotNil(t, sysextctlDown)
+	assert.Contains(t, sysextctlDown.Action, "launchctl print")
+	assert.NotContains(t, sysextctlDown.Action, "Install the agentsh macOS app bundle")
+
+	// Probe failure whose folded stderr happens to contain "not running" must
+	// still route to the unverifiable tip, not the not-running tip.
+	noisy := lookupTip("esf", "activated but liveness could not be verified (launchctl print system/X failed: exit status 1: service not running)")
+	assert.NotNil(t, noisy)
+	assert.Contains(t, noisy.Impact, "unverifiable")
+
+	// Not installed at all: fallback install tip unchanged.
+	fallback := lookupTip("esf", "not activated")
+	assert.NotNil(t, fallback)
+	assert.Contains(t, fallback.Action, "Install the agentsh macOS app bundle")
+}
